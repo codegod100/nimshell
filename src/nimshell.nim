@@ -1,8 +1,9 @@
 ## nimshell — a structured-data shell in Nim, inspired by Nushell.
 ## A port of gleshell (https://github.com/codegod100/gleshell).
 
-import std/[os, strutils]
-import nimshell/[color, display, env, eval, lineedit, pager, sys, value]
+import std/[os, strutils, times]
+import std/monotimes
+import nimshell/[display, env, eval, lineedit, pager, prompt, sys, value]
 
 proc printUsage() =
   println(@[
@@ -33,71 +34,6 @@ proc printValue(v: Value, allowPage: bool) =
   if allowPage and needsPaging(text): pager.run(text)
   else: println(text)
 
-# --- prompt ---
-
-proc firstLine(s: string): string =
-  let i = s.find('\n')
-  if i >= 0: s[0 ..< i] else: s
-
-proc readGitdirPointer(gitFile: string): string =
-  ## Worktree / linked checkout: `.git` is a file `gitdir: <path>`.
-  try:
-    let line = readFile(gitFile).firstLine.strip
-    if not line.startsWith("gitdir:"): return ""
-    let raw = line[7 .. ^1].strip
-    if raw == "": return ""
-    if raw.isAbsolute: raw else: gitFile.parentDir / raw
-  except IOError: ""
-
-proc findGitDir(start: string): string =
-  var dir = start
-  for _ in 0 ..< 32:
-    let candidate = dir / ".git"
-    if dirExists(candidate): return candidate
-    if fileExists(candidate): return readGitdirPointer(candidate)
-    let parent = dir.parentDir
-    if parent == "" or parent == dir: return ""
-    dir = parent
-  ""
-
-proc gitBranch(cwd: string): string =
-  ## Best-effort branch name by reading `.git` (no `git` process).
-  let gitDir = findGitDir(cwd)
-  if gitDir == "": return ""
-  try:
-    let line = readFile(gitDir / "HEAD").firstLine.strip
-    if line.startsWith("ref: "):
-      let reference = line[5 .. ^1].strip
-      if reference.startsWith("refs/heads/"): reference[11 .. ^1]
-      else: reference.extractFilename
-    elif line.len >= 7: line[0 ..< 7] # detached HEAD: short SHA
-    else: line
-  except IOError: ""
-
-proc displayCwd(cwd: string): string =
-  ## Full cwd with `$HOME` shown as `~`.
-  let (ok, home) = homeDir()
-  if not ok: return cwd
-  if cwd == home: "~"
-  elif cwd.startsWith(home & "/"): "~" & cwd[home.len .. ^1]
-  else: cwd
-
-proc promptFor(env: Env): string =
-  ## Zero-config Starship-inspired prompt: blank line, directory (+ git
-  ## branch), then a green/red Nerd Font terminal icon as the prompt char.
-  let on = enabled()
-  var status = promptPath(on, displayCwd(env.cwd))
-  let branch = gitBranch(env.cwd)
-  if branch != "":
-    status.add separator(on, " on ") & promptGit(on, " " & branch)
-  println("")
-  println(status)
-  # PUA glyphs often draw ~2 cells wide while the terminal advances one, so
-  # use two spaces after the icon.
-  let icon = if env.lastExit == 0: promptCharacterOk(on, "")
-             else: promptCharacterErr(on, "")
-  icon & "  "
-
 # --- modes ---
 
 proc runOnce(code: string) =
@@ -114,8 +50,9 @@ proc repl() =
   println("nimshell 0.1 — structured data shell (type `help`, `exit` to quit; " &
           "Tab completes, grey history hints, Ctrl+R fuzzy history)")
   var env = newEnv()
+  var lastDurationMs = 0'i64
   while true:
-    let (status, line) = readLine(promptFor(env))
+    let (status, line) = readLine(prompt.render(env.cwd, env.lastExit, lastDurationMs))
     case status
     of rsEof:
       saveHistory()
@@ -127,7 +64,9 @@ proc repl() =
       pushHistory(src)
       saveHistory()
       interrupted = false
+      let started = getMonoTime()
       let r = evalSource(env, src)
+      lastDurationMs = (getMonoTime() - started).inMilliseconds
       case r.kind
       of erQuit:
         saveHistory()

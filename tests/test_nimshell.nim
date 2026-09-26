@@ -2,7 +2,7 @@
 
 import std/[options, os, strutils, unittest]
 import ../src/nimshell/[builtins, color, display, env, eval, highlight, lexer,
-                        lineedit, pager, parser, syntax, sys, value]
+                        lineedit, pager, parser, prompt, syntax, sys, value]
 
 proc evalOk(src: string, e = newEnv()): Value =
   let r = evalSource(e, src)
@@ -516,3 +516,29 @@ suite "completion and history":
     check "gleam test" in historySearch(h2, "gts")
     check "gleam test" in historySearch(h2, "GLEAM")
     check historySearch(hist, "zzzz-nope").len == 0
+
+suite "prompt":
+  test "git status parsing":
+    let s = parseGitStatus("## main...origin/main [ahead 2, behind 1]\n M a.nim\nA  b.nim\n?? c.nim\n")
+    check s.modified and s.staged and s.untracked and not s.conflicted
+    check s.ahead == 2 and s.behind == 1
+    check gitStatusText(s) == "[!+?] ⇡2⇣1"
+    check gitStatusText(parseGitStatus("## main...origin/main\n")) == ""
+    check gitStatusText(parseGitStatus("## main\nUU x\n")) == "[=]"
+  test "duration":
+    check formatDuration(850) == "850ms"
+    check formatDuration(3000) == "3s"
+    check formatDuration(3250) == "3.2s"
+    check formatDuration(65_000) == "1m5s"
+    check formatDuration(7_380_000) == "2h3m"
+  test "status line":
+    let home = getEnv("HOME")
+    check statusLine(false, home / "code", "main", "[!]", 0, 0, false) == "~/code on main [!]"
+    check statusLine(false, "/tmp", "", "", 1, 3200, false) == "/tmp took 3.2s ✘ 1"
+    check statusLine(false, "/tmp", "dev", "", 0, 500, true) == "/tmp on  dev"
+  test "prompt char":
+    check promptChar(false, 0, false) == "❯ "
+    check promptChar(false, 1, false) == "❯ "
+    check "32m❯" in promptChar(true, 0, false)
+    check "31m❯" in promptChar(true, 2, false)
+    check promptChar(false, 0, true) == "  "

@@ -9,8 +9,8 @@ values: strings, numbers, lists, records, and tables. Built-in commands like
 `ls`, `where`, and `select` work on that structure.
 
 ```text
-~/code/nimshell on  main
- ls | where type == file | select name size | first 5
+~/code/nimshell on main [!?] ⇡1 took 3.2s
+❯ ls | where type == file | select name size | first 5
 ╭──────┬──────╮
 │ name │ size │
 ├──────┼──────┤
@@ -18,10 +18,17 @@ values: strings, numbers, lists, records, and tables. Built-in commands like
 ╰──────┴──────╯
 ```
 
-The interactive prompt is zero-config and Starship-inspired: full path with `~`,
-optional git branch (read from `.git`, no external tools), and a Nerd Font shell
-icon (``) as the prompt character (turns red after a non-zero exit).
-Install a Nerd Font so the glyphs render.
+The interactive prompt is zero-config and Starship-inspired:
+
+- full path with `~`
+- git branch (read from `.git`) plus status from `git status`:
+  `=` conflicts, `!` modified, `+` staged, `?` untracked, `⇡n`/`⇣n` ahead/behind
+- `took 3.2s` when the last command ran for 2 seconds or more
+- `✘ <code>` and a red `❯` after a non-zero exit
+
+It uses plain Unicode, so it renders in any terminal. With a
+[Nerd Font](https://www.nerdfonts.com) installed, set `NIMSHELL_NERD_FONT=1` for a
+branch icon and the `` terminal prompt character.
 
 ## Quick start
 
@@ -184,6 +191,7 @@ src/
     highlight.nim         # live input syntax highlighting
     lineedit.nim          # raw line editor, history, completion, Ctrl+R
     syntax.nim            # file language detect + cat highlighters
+    prompt.nim            # Starship-inspired prompt (git status, duration)
     env.nim / sys.nim / term.nim
 tests/
   test_nimshell.nim       # ported from gleshell's test suite
