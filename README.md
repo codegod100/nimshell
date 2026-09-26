@@ -202,6 +202,12 @@ tests/
   test_nimshell.nim       # ported from gleshell's test suite
 ```
 
+On a terminal, tables, lists and records are fitted to the window width like
+Nushell: free-text columns (names, commands, paths) shrink first and long
+cells end in `…`; numbers, sizes and dates are cut only as a last resort; if
+the table still doesn't fit, columns are dropped from the right and a `…`
+column marks the hidden ones. Pipes and redirects always get the full data.
+
 Output is colorized on a TTY (headers bold green, numbers purple, bools cyan,
 dirs blue, errors red, …). Pre-colored text from external tools is not
 re-painted. Disable with `NO_COLOR=1`; force with `FORCE_COLOR=1`.

@@ -554,3 +554,39 @@ suite "terminal title":
     check titleSequence("vim notes.md") == "\e]0;vim notes.md\a"
   test "idle title":
     check idleTitle(getEnv("HOME") / "code") == "~/code"
+
+suite "fit to terminal width":
+  test "truncate visible":
+    check truncateVisible("hello", 10) == "hello"
+    check truncateVisible("hello world", 6) == "hello…"
+    check truncateVisible("\e[31mhello world\e[0m", 6) == "\e[31mhello…\e[0m"
+    check visibleLength(truncateVisible("\e[31mhello world\e[0m", 6)) == 6
+  test "fit columns shrinks free text first":
+    # name(40) type(4) size(4) modified(23): natural total 84
+    let (w, shown) = fitColumns(@[40, 4, 4, 23], @[4, 4, 4, 8], 60, @[false, false, true, true])
+    check shown == 4
+    check w == @[16, 4, 4, 23]
+  test "fit columns drops columns when too narrow":
+    let (w, shown) = fitColumns(@[40, 4, 4, 23], @[4, 4, 4, 8], 20)
+    check shown == 2
+    check w[0 ..< 2] == @[5, 4] # 1 + (5+3) + (4+3) + marker 4 = 20
+  test "unlimited width keeps natural widths":
+    check fitColumns(@[40, 4], @[4, 4], 0) == (@[40, 4], 2)
+  test "render fits every line":
+    let t = tableV(@["name", "size", "note"], @[
+      @[strV("x".repeat(80)), intV(1536), strV("y".repeat(50))],
+      @[strV("short"), intV(0), strV("z")]])
+    for width in [80, 50, 30, 16]:
+      for line in renderWith(false, t, width).splitLines:
+        check visibleLength(line) <= width
+    check "…" in renderWith(false, t, 50)
+    # unlimited (pipes / tests) keeps the full data
+    check "x".repeat(80) in renderWith(false, t)
+  test "records and lists truncate long values":
+    let r = recordV(@[("k", strV("v".repeat(100)))])
+    for line in renderWith(false, r, 40).splitLines: check visibleLength(line) <= 40
+    let l = listV(@[strV("w".repeat(100))])
+    for line in renderWith(false, l, 40).splitLines: check visibleLength(line) <= 40
+  test "embedded newlines stay on one row":
+    let t = tableV(@["a"], @[@[strV("one\ntwo")]])
+    check renderWith(false, t).splitLines.len == 5
