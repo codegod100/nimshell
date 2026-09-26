@@ -1,0 +1,5 @@
+# build outputs
+/nimshell
+/tests/test_nimshell
+nimcache/
+*.exe
