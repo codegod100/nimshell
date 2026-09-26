@@ -26,7 +26,7 @@ The interactive prompt is zero-config and Starship-inspired:
 - `took 3.2s` when the last command ran for 2 seconds or more
 - `✘ <code>` and a red `❯` after a non-zero exit
 
-The terminal tab/window title shows `nimshell: <dir>` at the prompt and the
+The terminal tab/window title shows the current directory (e.g. `~/code/project`) at the prompt and the
 running command line while a command runs (the previous title is restored on
 exit). Set `NIMSHELL_NO_TITLE=1` to leave the title alone.
 

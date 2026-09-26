@@ -553,4 +553,4 @@ suite "terminal title":
   test "sequence":
     check titleSequence("vim notes.md") == "\e]0;vim notes.md\a"
   test "idle title":
-    check idleTitle(getEnv("HOME") / "code") == "nimshell: ~/code"
+    check idleTitle(getEnv("HOME") / "code") == "~/code"

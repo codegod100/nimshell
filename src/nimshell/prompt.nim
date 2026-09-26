@@ -199,8 +199,8 @@ proc setTitle*(text: string) =
   if titleEnabled(): sys.write(titleSequence(text))
 
 proc idleTitle*(cwd: string): string =
-  ## Title while sitting at the prompt: `nimshell: ~/code/project`.
-  "nimshell: " & displayCwd(cwd)
+  ## Title while sitting at the prompt: the directory, e.g. `~/code/project`.
+  displayCwd(cwd)
 
 proc pushTitle*() =
   ## Save the terminal's current title (XTWINOPS 22) so exit can restore it.
