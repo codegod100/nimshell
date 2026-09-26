@@ -162,7 +162,8 @@ bodies and responses (`http get https://example.com`, `http post URL {a: 1}`,
 
 Pager: `less` — builtin color-aware pager for pipeline input or files
 (`ls | less`, `less README.md`). ANSI from tables and external tools is kept;
-short output is printed without an interactive session. Interactive keys include
+short output is printed without an interactive session. The mouse wheel scrolls (hold Shift
+to select text). Interactive keys include
 live `/` search (case-insensitive, finds as you type) and `n`/`N` next/previous
 match. `^less` still runs the external binary.
 

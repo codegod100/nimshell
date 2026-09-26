@@ -14,6 +14,7 @@ from std/unicode import toLower, runes, runeLen, `$`
 import color, sys
 
 const
+  wheelStep = 3 ## lines per scroll-wheel notch
   matchOn = "\e[30;103m"  ## black on bright yellow
   matchOff = "\e[39;49m"
 
@@ -219,6 +220,7 @@ proc showHelp(height, cols: int) =
     "",
     "  j / ↓ / Enter     one line down",
     "  k / ↑             one line up",
+    "  mouse wheel       scroll 3 lines (hold Shift to select text)",
     "  space / f / PgDn  one page down",
     "  b / PgUp          one page up",
     "  g / Home          top",
@@ -246,7 +248,9 @@ proc run*(text: string) =
   let total = lines.len
   let maxOff = max(0, total - height)
   withKeyMode:
-    sys.write("\e[?1049h\e[H")
+    # Alternate screen + mouse reporting (button events, SGR encoding) so the
+    # scroll wheel reaches us. Hold Shift to select text in most terminals.
+    sys.write("\e[?1049h\e[H\e[?1000h\e[?1006h")
     var offset = 0
     var pattern = none(string)
     var message = none(string)
@@ -270,6 +274,8 @@ proc run*(text: string) =
       of "eof", "q", "Q", "ctrl_c", "ctrl_d": break
       of "down", "j", "enter": inc offset
       of "up", "k": dec offset
+      of "wheel_down": offset += wheelStep
+      of "wheel_up": offset -= wheelStep
       of "space", "f", "page_down", "ctrl_f": offset += height
       of "b", "page_up", "ctrl_b": offset -= height
       of "g", "home": offset = 0
@@ -288,4 +294,4 @@ proc run*(text: string) =
       of "N": search(false)
       of "h", "?": showHelp(height, cols)
       else: discard
-    sys.write("\e[?1049l")
+    sys.write("\e[?1006l\e[?1000l\e[?1049l")

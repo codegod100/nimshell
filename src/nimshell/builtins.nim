@@ -335,6 +335,7 @@ proc helpFor(name: string): Option[string] =
       "  j / ↓ / Enter     line down     k / ↑        line up",
       "  space / f / PgDn  page down     b / PgUp     page up",
       "  g / Home          top           G / End      bottom",
+      "  mouse wheel       scroll (hold Shift to select text)",
       "  /pattern          live search   n / N        next/prev",
       "  h / ?             help          q / Ctrl+C   quit",
       "",

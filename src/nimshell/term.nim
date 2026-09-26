@@ -1,6 +1,6 @@
 ## Low-level terminal helpers: raw mode, key decoding, window size.
 
-import std/[posix, termios]
+import std/[posix, strutils, termios]
 
 type
   WinSize {.importc: "struct winsize", header: "<sys/ioctl.h>".} = object
@@ -74,6 +74,14 @@ proc readUtf8Tail(first: char): string =
     if not readByte(c): break
     result.add c
 
+proc mouseButtonName(button: int): string =
+  ## Wheel events carry bit 6 (64 = up, 65 = down); modifiers add 4/8/16.
+  if (button and 64) != 0:
+    if (button and 3) == 0: "wheel_up"
+    elif (button and 3) == 1: "wheel_down"
+    else: "mouse"
+  else: "mouse"
+
 proc readCsi(): string =
   ## After `ESC [`: collect params up to the final byte.
   var params = ""
@@ -81,6 +89,16 @@ proc readCsi(): string =
     var c: char
     if not readByte(c): return "esc"
     if ord(c) >= 0x40 and ord(c) <= 0x7E:
+      # SGR mouse report (mode 1006): `ESC [ < button ; col ; row M|m`
+      if params.startsWith("<") and c in {'M', 'm'}:
+        try: return mouseButtonName(parseInt(params[1 .. ^1].split(';')[0]))
+        except ValueError: return "mouse"
+      # Legacy X10 mouse report: `ESC [ M` + three raw bytes (button + 32).
+      if params == "" and c == 'M':
+        var b, x, y: char
+        if readByte(b) and readByte(x) and readByte(y):
+          return mouseButtonName(ord(b) - 32)
+        return "mouse"
       case c
       of 'A': return "up"
       of 'B': return "down"
