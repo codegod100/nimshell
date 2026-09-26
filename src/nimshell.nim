@@ -51,11 +51,15 @@ proc repl() =
           "Tab completes, grey history hints, Ctrl+R fuzzy history)")
   var env = newEnv()
   var lastDurationMs = 0'i64
+  pushTitle()
   while true:
+    # Tab title: the directory while idle, the command line while it runs.
+    setTitle(idleTitle(env.cwd))
     let (status, line) = readLine(prompt.render(env.cwd, env.lastExit, lastDurationMs))
     case status
     of rsEof:
       saveHistory()
+      popTitle()
       return
     of rsInterrupted: continue
     of rsLine:
@@ -64,12 +68,14 @@ proc repl() =
       pushHistory(src)
       saveHistory()
       interrupted = false
+      setTitle(if src.startsWith("^"): src[1 .. ^1] else: src)
       let started = getMonoTime()
       let r = evalSource(env, src)
       lastDurationMs = (getMonoTime() - started).inMilliseconds
       case r.kind
       of erQuit:
         saveHistory()
+        popTitle()
         quit(r.code)
       of erContinue:
         printValue(r.value, true)

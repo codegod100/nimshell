@@ -164,3 +164,47 @@ proc render*(cwd: string, lastExit: int, durationMs: int64): string =
   println(statusLine(on, cwd, branch, gitText, lastExit, durationMs, nerd))
   promptChar(on, lastExit, nerd)
 
+
+# --- terminal tab / window title (OSC 0) ---
+
+proc titleEnabled*(): bool =
+  ## On for a real terminal; `NIMSHELL_NO_TITLE=1` or `TERM=dumb` turns it off.
+  stdoutIsatty() and getEnv("TERM") != "dumb" and
+    getEnv("NIMSHELL_NO_TITLE") in ["", "0", "false", "no"]
+
+proc sanitizeTitle*(text: string, maxLen = 80): string =
+  ## Strip ANSI and control characters (an ESC/BEL would end the OSC early),
+  ## collapse whitespace, and truncate long command lines with `…`.
+  var cps: seq[string]
+  var lastSpace = false
+  for (start, n, esc) in ansiScan(text):
+    if esc: continue
+    let piece = text[start ..< start + n]
+    if piece.len == 1 and (ord(piece[0]) < 32 or ord(piece[0]) == 127):
+      if not lastSpace and cps.len > 0: cps.add " "
+      lastSpace = true
+    elif piece == " ":
+      if not lastSpace and cps.len > 0: cps.add " "
+      lastSpace = true
+    else:
+      cps.add piece
+      lastSpace = false
+  while cps.len > 0 and cps[^1] == " ": cps.setLen(cps.len - 1)
+  if cps.len > maxLen: cps = cps[0 ..< maxLen - 1] & @["…"]
+  cps.join("")
+
+proc titleSequence*(text: string): string = "\e]0;" & sanitizeTitle(text) & "\a"
+
+proc setTitle*(text: string) =
+  if titleEnabled(): sys.write(titleSequence(text))
+
+proc idleTitle*(cwd: string): string =
+  ## Title while sitting at the prompt: `nimshell: ~/code/project`.
+  "nimshell: " & displayCwd(cwd)
+
+proc pushTitle*() =
+  ## Save the terminal's current title (XTWINOPS 22) so exit can restore it.
+  if titleEnabled(): sys.write("\e[22;0t")
+
+proc popTitle*() =
+  if titleEnabled(): sys.write("\e[23;0t")

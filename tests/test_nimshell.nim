@@ -542,3 +542,15 @@ suite "prompt":
     check "32m❯" in promptChar(true, 0, false)
     check "31m❯" in promptChar(true, 2, false)
     check promptChar(false, 0, true) == "  "
+
+suite "terminal title":
+  test "sanitize":
+    check sanitizeTitle("ls | first 3") == "ls | first 3"
+    check sanitizeTitle("echo \e[31mred\e[0m") == "echo red"
+    check sanitizeTitle("a\x07b\nc  d ") == "a b c d"
+    let long = sanitizeTitle("x".repeat(100), 10)
+    check long == "xxxxxxxxx…"
+  test "sequence":
+    check titleSequence("vim notes.md") == "\e]0;vim notes.md\a"
+  test "idle title":
+    check idleTitle(getEnv("HOME") / "code") == "nimshell: ~/code"

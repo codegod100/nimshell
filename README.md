@@ -26,6 +26,10 @@ The interactive prompt is zero-config and Starship-inspired:
 - `took 3.2s` when the last command ran for 2 seconds or more
 - `✘ <code>` and a red `❯` after a non-zero exit
 
+The terminal tab/window title shows `nimshell: <dir>` at the prompt and the
+running command line while a command runs (the previous title is restored on
+exit). Set `NIMSHELL_NO_TITLE=1` to leave the title alone.
+
 It uses plain Unicode, so it renders in any terminal. With a
 [Nerd Font](https://www.nerdfonts.com) installed, set `NIMSHELL_NERD_FONT=1` for a
 branch icon and the `` terminal prompt character.
