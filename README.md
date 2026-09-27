@@ -127,6 +127,31 @@ History is persisted under `$XDG_CACHE_HOME/nimshell-history/lines`
 (default `~/.cache/nimshell-history/lines`). Non-TTY input falls back to plain
 line reads.
 
+### Config
+
+Optional; nimshell reads `$XDG_CONFIG_HOME/nimshell/config.kdl` (default
+`~/.config/nimshell/config.kdl`) at startup, for both the REPL and `-c`:
+
+```kdl
+env {
+    EDITOR "nvim"
+    GOPATH "~/go"
+    SOME_VAR null          // null unsets
+}
+
+path {
+    prepend "~/.local/bin" "$GOPATH/bin"
+    append "/opt/tools/bin"
+}
+```
+
+- `path "a" "b"` is shorthand for `path { prepend "a" "b" }`. An entry that is
+  already on `PATH` moves instead of being duplicated.
+- Values expand a leading `~` and `$VAR` / `${VAR}`. Nodes apply in file
+  order, so `path` can use variables set by an earlier `env`.
+- Mistakes (bad KDL, unknown settings) print a warning to stderr; the shell
+  still starts.
+
 ## Examples
 
 ```nu
@@ -257,6 +282,7 @@ src/
     prompt.nim            # Starship-inspired prompt (git status, duration)
     update.nim            # AppImage self-update
     netclient.nim         # HTTP client setup (TLS, proxies)
+    config.nim / kdl.nim  # config.kdl loader + minimal KDL parser
     env.nim / sys.nim / term.nim
 packaging/
   build-appimage.sh       # AppDir + bundled libs + appimagetool
