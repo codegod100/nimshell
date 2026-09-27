@@ -1,7 +1,7 @@
 ## Test suite — ported from gleshell's gleeunit tests.
 
 import std/[options, os, strutils, unittest]
-import ../src/nimshell/[builtins, color, config, kdl, display, env, eval, highlight, lexer,
+import ../src/nimshell/[alias, builtins, color, config, kdl, display, env, eval, highlight, lexer,
                         lineedit, netclient, pager, parser, prompt, syntax, sys,
                         update, value]
 
@@ -856,3 +856,44 @@ suite "prompt config":
     check applyConfig("prompt { single-line \"yes\" }").len == 1
     check applyConfig("prompt { colors { cwd \"sparkly\" } }").len == 1
     check applyConfig("prompt { colors { nope \"red\" } }").len == 1
+
+suite "aliases":
+  teardown: clearAliases()
+  test "config block and one-liner":
+    let warnings = applyConfig("""
+      aliases {
+        five "range 5"
+        top3 "range 10 | reverse | first 3"
+      }
+      alias two "five | first 2"
+    """)
+    check warnings.len == 0
+    check aliasNames() == @["five", "top3", "two"]
+    check evalOk("top3") == evalOk("range 10 | reverse | first 3")
+    # alias of an alias, and use mid-pipeline
+    check evalOk("two") == evalOk("range 5 | first 2")
+    check evalOk("five | first 1") == evalOk("range 5 | first 1")
+  test "extra words go to the last command":
+    check defineAlias("rev", "range 10 | first") == ""
+    check evalOk("rev 2") == evalOk("range 10 | first 2")
+  test "an alias can wrap the name it shadows":
+    check defineAlias("range", "range 3") == ""
+    check evalOk("range") == evalOk("echo [0 1 2]")
+  test "in let and which":
+    check defineAlias("five", "range 5") == ""
+    let (e, _) = evalEnv("let x = five")
+    check getVar(e, "x") == evalOk("range 5")
+    check evalOk("which five") == strV("alias: five = range 5")
+    check evalOk("aliases").kind == vkTable
+  test "applyConfig replaces aliases":
+    check applyConfig("alias a \"range 1\"").len == 0
+    check applyConfig("").len == 0
+    check not isAlias("a")
+  test "bad aliases warn":
+    check defineAlias("bad name", "ls") != ""
+    check defineAlias("let", "ls") != ""
+    check defineAlias("x", "let y = 1") != ""
+    check defineAlias("x", "ls |") != ""
+    check applyConfig("aliases { x 1 }").len == 1
+    check applyConfig("alias x").len == 1
+    check not isAlias("x")

@@ -10,6 +10,10 @@
 ##       append "/opt/tools/bin"
 ##   }
 ##
+##   aliases {
+##       ll "ls -l"
+##       gs "^git status"
+##   }
 ##   prompt {
 ##       character "λ"
 ##       single-line #true
@@ -21,7 +25,7 @@
 ## `path` can use variables set by an earlier `env`.
 
 import std/[os, strutils]
-import color, kdl, prompt, sys
+import alias, color, kdl, prompt, sys
 
 proc configFile*(): string =
   let xdg = getEnv("XDG_CONFIG_HOME")
@@ -139,10 +143,30 @@ proc applyPrompt(n: KdlNode, warnings: var seq[string]) =
     else: warnings.add("line " & $c.line & ": unknown prompt setting `" & c.name & "`")
   promptConfig = cfg
 
+proc addAlias(c: KdlNode, name: string, value: KdlVal, warnings: var seq[string]) =
+  if value.kind != kkString:
+    warnings.add("line " & $c.line & ": alias " & name & ": expected a command string")
+    return
+  let e = defineAlias(name, value.str)
+  if e != "": warnings.add("line " & $c.line & ": alias " & name & ": " & e)
+
+proc applyAliases(n: KdlNode, warnings: var seq[string]) =
+  if n.name == "alias":
+    # one-liner: `alias ll "ls -l"`
+    if n.args.len == 2 and n.args[0].kind == kkString:
+      addAlias(n, n.args[0].str, n.args[1], warnings)
+    else:
+      warnings.add("line " & $n.line & ": expected `alias <name> \"<command>\"`")
+    return
+  for c in n.children:
+    if c.args.len == 1: addAlias(c, c.name, c.args[0], warnings)
+    else: warnings.add("line " & $c.line & ": alias " & c.name & ": expected one command string")
+
 proc applyConfig*(src: string): seq[string] =
-  ## Apply config text to the process environment and prompt settings
-  ## (which start from the defaults); returns warnings.
+  ## Apply config text to the process environment, prompt settings and
+  ## aliases (the latter two start from the defaults); returns warnings.
   promptConfig = defaultPromptConfig()
+  clearAliases()
   var nodes: seq[KdlNode]
   try: nodes = parseKdl(src)
   except KdlError as e: return @[e.msg]
@@ -151,6 +175,7 @@ proc applyConfig*(src: string): seq[string] =
     of "path": applyPath(n, result)
     of "env": applyEnv(n, result)
     of "prompt": applyPrompt(n, result)
+    of "aliases", "alias": applyAliases(n, result)
     else: result.add("line " & $n.line & ": unknown setting `" & n.name & "`")
 
 proc addConfigPaths*(dirs: seq[string]): string

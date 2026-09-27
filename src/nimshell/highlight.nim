@@ -1,6 +1,6 @@
 ## Live syntax highlighting for the REPL input line (Nushell-style shapes).
 
-import color, builtins, lexer
+import alias, color, builtins, lexer
 
 type Expect = enum
   ExpectCommand, ExpectArg
@@ -103,7 +103,7 @@ proc highlight*(on: bool, source: string): string =
         else:
           if expect == ExpectCommand:
             if w == "let": result.add shapeKeyword(true, w)
-            elif isBuiltin(w): result.add shapeInternalcall(true, w)
+            elif isBuiltin(w) or isAlias(w): result.add shapeInternalcall(true, w)
             else: result.add shapeExternal(true, w)
           else:
             result.add shapeExternalarg(true, w)

@@ -3,7 +3,7 @@
 import std/[algorithm, base64, httpclient, json, net, options, os, strutils,
             tables, times, uri]
 from std/unicode import runes, `$`, validateUtf8, toLower
-import color, config, display, env, netclient, pager, syntax, sys, update, value
+import alias, color, config, display, env, netclient, pager, syntax, sys, update, value
 
 type
   BuiltinResultKind* = enum
@@ -176,7 +176,8 @@ proc helpText(): Table[string, string] =
     "type": "type — alias for typeof",
     "describe": "describe — record with type, length, and string form of input",
     "env": "env [NAME] — process environment table, or one var (same as `$env` / `$env.NAME`)",
-    "which": "which [-a|--all] [-f|--follow] <name> — path of command (builtin or on PATH); -a all matches, -f follow symlinks",
+    "which": "which [-a|--all] [-f|--follow] <name> — path of command (alias, builtin or on PATH); -a all matches, -f follow symlinks",
+    "aliases": "aliases — table of command aliases from config.kdl (name, expansion)",
     "add-path": "add-path [-n|--no-save] <dir>… — prepend dirs to PATH and save them to config.kdl (like fish_add_path)",
     "add_to_path": "add_to_path — alias for add-path",
     "remove-path": "remove-path <dir>… — remove dirs from PATH and from config.kdl",
@@ -1155,14 +1156,17 @@ proc cmdWhich(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinRe
   if cands.len != 1: return err(env, "which: expected name (try `which [-a] [-f] <name>`)")
   let name = asString(cands[0])
   let builtin = isBuiltin(name)
+  let aliasText = if isAlias(name): "alias: " & name & " = " & aliases[name].source else: ""
   if all:
     var matches: seq[Value]
+    if aliasText != "": matches.add strV(aliasText)
     if builtin: matches.add strV("builtin: " & name)
     for p in whichAll(name): matches.add strV(whichMaybeFollow(follow, p))
     case matches.len
     of 0: return err(env, "which: " & name & " not found")
     of 1: return ok(env, matches[0])
     else: return ok(env, listV(matches))
+  if aliasText != "": return ok(env, strV(aliasText))
   if builtin: return ok(env, strV("builtin: " & name))
   let (found, path) = which(name)
   if found: ok(env, strV(whichMaybeFollow(follow, path)))
@@ -1371,6 +1375,11 @@ proc cmdSelfUpdate(env: Env, input: Value, args: seq[Value], flags: Flags): Buil
   if r.updated: ok(env, strV(r.message & " (restart nimshell to use it)"))
   else: ok(env, strV(r.message))
 
+proc cmdAliases(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinResult =
+  var rows: seq[seq[Value]]
+  for n in aliasNames(): rows.add @[strV(n), strV(aliases[n].source)]
+  ok(env, tableV(@["name", "expansion"], rows))
+
 proc cmdVersion(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinResult =
   let image = appImagePath()
   ok(env, recordV(@[("version", strV(NimshellVersion)),
@@ -1470,6 +1479,7 @@ let registryTable = {
   "less": cmdLess,
   "self-update": cmdSelfUpdate,
   "version": cmdVersion,
+  "aliases": cmdAliases,
 }.toTable
 
 proc lookup*(name: string, b: var Builtin): bool =
