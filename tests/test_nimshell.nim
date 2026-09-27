@@ -146,6 +146,12 @@ suite "eval":
     let b = evalOk("let m = echo ab|^wc -c")
     check b.kind == vkString and "2" in b.s
 
+  test "external argv keeps short vs long flag dashes":
+    let v = evalOk("^printf '%s,' -fr --force -x --y target")
+    check v.kind == vkString and v.s.strip == "-fr,--force,-x,--y,target,"
+    check lexOk("rm -fr x")[1].short
+    check not lexOk("rm --fr x")[1].short
+
   test "let and var":
     let (e2, v) = evalEnv("let n = echo 7")
     check v == intV(7)

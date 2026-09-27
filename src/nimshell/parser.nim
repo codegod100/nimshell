@@ -25,6 +25,7 @@ type
     of argValue: expr*: Expr
     of argFlag:
       flagName*: string
+      flagShort*: bool ## written as `-x`/`-fr` rather than `--name`
       hasValue*: bool
       flagValue*: Expr
 
@@ -48,9 +49,10 @@ type
 
 proc lit*(v: Value): Expr = Expr(kind: exLit, lit: v)
 proc valueArg*(e: Expr): Arg = Arg(kind: argValue, expr: e)
-proc flagArg*(name: string): Arg = Arg(kind: argFlag, flagName: name)
-proc flagArg*(name: string, e: Expr): Arg =
-  Arg(kind: argFlag, flagName: name, hasValue: true, flagValue: e)
+proc flagArg*(name: string, short = false): Arg =
+  Arg(kind: argFlag, flagName: name, flagShort: short)
+proc flagArg*(name: string, e: Expr, short = false): Arg =
+  Arg(kind: argFlag, flagName: name, flagShort: short, hasValue: true, flagValue: e)
 
 proc `==`*(a, b: Expr): bool {.noSideEffect.}
 
@@ -91,7 +93,7 @@ proc tokenName(t: Token): string =
   of tkFloatLit: "float"
   of tkBoolLit: "bool"
   of tkPipe: "|"
-  of tkFlag: "--" & t.text
+  of tkFlag: (if t.short: "-" else: "--") & t.text
   of tkEof: "eof"
   of tkAssign: "="
   of tkEq: "=="
@@ -194,9 +196,9 @@ proc parseArgs(c: var Cursor): seq[Arg] =
         result.add valueArg(lit(strV("--")))
       elif isExprStart(c):
         let e = glueColonSuffix(parseExpr(c), c)
-        result.add flagArg(t.text, e)
+        result.add flagArg(t.text, e, t.short)
       else:
-        result.add flagArg(t.text)
+        result.add flagArg(t.text, t.short)
     # Comparison operators as bare string args (for `where field == value`)
     of tkEq, tkAssign: inc c.pos; result.add valueArg(lit(strV("==")))
     of tkNe: inc c.pos; result.add valueArg(lit(strV("!=")))

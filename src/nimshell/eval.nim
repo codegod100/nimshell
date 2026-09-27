@@ -53,9 +53,10 @@ proc evalArgs(env: Env, args: seq[Arg], pos: var seq[Value], flags: var Flags): 
         flags[a.flagName] = boolV(true)
   ""
 
-proc formatFlagName(name: string): string =
+proc formatFlagName(name: string, short: bool): string =
+  ## Rebuild the flag as typed: `-fr` stays `-fr`, `--force` stays `--force`.
   if name.startsWith("-"): name
-  elif name.len == 1: "-" & name
+  elif short: "-" & name
   else: "--" & name
 
 proc evalArgv(env: Env, args: seq[Arg], argv: var seq[string]): string =
@@ -67,7 +68,7 @@ proc evalArgv(env: Env, args: seq[Arg], argv: var seq[string]): string =
       if not ok: return msg
       argv.add asString(v)
     of argFlag:
-      argv.add formatFlagName(a.flagName)
+      argv.add formatFlagName(a.flagName, a.flagShort)
       if a.hasValue:
         let (ok, v, msg) = evalExpr(env, a.flagValue)
         if not ok: return msg

@@ -11,6 +11,7 @@ type
     tkNothingLit, tkEof
 
   Token* = object
+    short*: bool ## tkFlag only: written with a single dash (`-fr`), not `--`
     case kind*: TokenKind
     of tkIdent, tkStringLit, tkFlag: text*: string
     of tkIntLit: intVal*: int64
@@ -25,7 +26,8 @@ type
 proc tok*(kind: TokenKind): Token = Token(kind: kind)
 proc ident*(s: string): Token = Token(kind: tkIdent, text: s)
 proc strLit*(s: string): Token = Token(kind: tkStringLit, text: s)
-proc flag*(s: string): Token = Token(kind: tkFlag, text: s)
+proc flag*(s: string, short = false): Token =
+  Token(kind: tkFlag, text: s, short: short)
 proc intLit*(n: int64): Token = Token(kind: tkIntLit, intVal: n)
 proc floatLit*(f: float): Token = Token(kind: tkFloatLit, floatVal: f)
 proc boolLit*(b: bool): Token = Token(kind: tkBoolLit, boolVal: b)
@@ -203,7 +205,7 @@ proc tokenize*(source: string, tokens: var seq[Token], err: var LexError): bool 
         if name == "":
           err = LexError(message: "expected flag name after -", position: pos)
           return false
-        tokens.add flag(name)
+        tokens.add flag(name, short = true)
     else:
       if isDigit(c):
         let pos = i
