@@ -82,16 +82,21 @@ packaging/build-appimage.sh      # dist/nimshell-<arch>.AppImage (+ .zsync)
 
 ### Releasing
 
-Bump `version` in `nimshell.nimble`, commit, then push a tag:
+Releases are automatic. Every push to `main` (other than docs-only changes)
+runs the tests, builds the AppImage on Ubuntu 22.04 (for broad glibc
+compatibility), smoke-tests it, and publishes it with its `.zsync` as a new
+GitHub release. Installed AppImages pick it up on their next daily check or
+`self-update`.
+
+Versions are `<major>.<minor>` from `nimshell.nimble` plus the CI run number as
+the patch (e.g. `v0.2.14`); bump `version` in `nimshell.nimble` to start a new
+minor/major series. To publish an exact version instead, push a tag:
 
 ```bash
-git tag v0.2.0 && git push origin v0.2.0
+git tag v1.0.0 && git push origin v1.0.0
 ```
 
-The `appimage` workflow builds the AppImage on Ubuntu 22.04 (for broad glibc
-compatibility), smoke-tests it, and publishes it with its `.zsync` to the GitHub
-release. Every other push and pull request builds the AppImage as a workflow
-artifact without publishing.
+Pull requests build the AppImage as a workflow artifact without publishing.
 
 ### REPL editing
 
