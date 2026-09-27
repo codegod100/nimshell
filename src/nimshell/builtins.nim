@@ -177,6 +177,7 @@ proc helpText(): Table[string, string] =
     "add-path": "add-path [-n|--no-save] <dir>… — prepend dirs to PATH and save them to config.kdl (like fish_add_path)",
     "add_to_path": "add_to_path — alias for add-path",
     "remove-path": "remove-path <dir>… — remove dirs from PATH and from config.kdl",
+    "config": "config <edit|path> — open config.kdl in $VISUAL/$EDITOR (then reload it), or print its path",
     "exit": "exit [code] — leave the shell (default code 0)",
     "quit": "quit [code] — alias for exit",
     "ignore": "ignore — discard pipeline input; emit nothing",
@@ -412,6 +413,20 @@ proc helpFor(name: string): Option[string] =
       "  now",
       "  let t = now",
       "  ls | where modified > 1700000000",
+    ].join("\n"))
+  of "config":
+    some(@[
+      "config <subcommand> — work with the config file (config.kdl)",
+      "",
+      "Subcommands:",
+      "  edit    open config.kdl in $VISUAL, else $EDITOR, else vi; the",
+      "          config is re-applied when the editor exits",
+      "  path    path of config.kdl ($XDG_CONFIG_HOME/nimshell/config.kdl)",
+      "",
+      "Examples:",
+      "  config edit",
+      "  config path",
+      "  open (config path)",
     ].join("\n"))
   of "input":
     some(@[
@@ -1139,6 +1154,33 @@ proc cmdRemovePath(env: Env, input: Value, args: seq[Value], flags: Flags): Buil
   if msg != "": return err(env, "remove-path: " & msg)
   pathResult(env)
 
+proc editorCommand(): string =
+  for name in ["VISUAL", "EDITOR"]:
+    let e = getEnv(name).strip
+    if e != "": return e
+  "vi"
+
+proc cmdConfig(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinResult =
+  ## `config edit` opens config.kdl in the user's editor and re-applies it;
+  ## `config path` returns where it lives.
+  let sub = if args.len > 0: asString(args[0]) else: ""
+  case sub
+  of "path": ok(env, strV(configFile()))
+  of "edit":
+    let path = configFile()
+    try: createDir(path.parentDir)
+    except OSError as e: return err(env, "config edit: " & e.msg)
+    # Run through sh so editors with flags (`code --wait`) work.
+    let (ran, status, msg) = runCmdTty("/bin/sh",
+      @["-c", editorCommand() & " \"$1\"", "sh", path], "")
+    if not ran: return err(env, "config edit: " & msg)
+    if status != 0: return err(env, "config edit: editor exited with status " & $status)
+    let warnings = loadConfig()
+    if warnings.len > 0: return err(env, "config edit: " & warnings.join("\n"))
+    ok(env, nothing())
+  of "": err(env, "config: expected subcommand (try `config edit` or `config path`)")
+  else: err(env, "config: unknown subcommand `" & sub & "` (try `config edit` or `config path`)")
+
 proc cmdWhich(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinResult =
   # Boolean flags may steal the next word (`which -a name` → flag a = "name").
   let (all, stolenA) = findBoolFlag(flags, ["a", "all"])
@@ -1447,6 +1489,7 @@ let registryTable = {
   "add-path": cmdAddPath,
   "add_to_path": cmdAddPath,
   "remove-path": cmdRemovePath,
+  "config": cmdConfig,
   "exit": cmdExit,
   "quit": cmdExit,
   "ignore": cmdIgnore,
