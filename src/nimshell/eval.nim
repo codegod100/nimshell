@@ -20,7 +20,10 @@ proc cont(env: Env, v: Value): EvalResult =
 
 proc evalExpr(env: Env, e: Expr): (bool, Value, string) =
   case e.kind
-  of exLit: (true, e.lit, "")
+  of exLit:
+    # Unquoted `~` / `~/x` means home, like POSIX shells; `"~"` stays literal.
+    if e.bare and e.lit.kind == vkString: (true, strV(expandHome(e.lit.s)), "")
+    else: (true, e.lit, "")
   of exVar: (true, getVar(env, e.name), "")
   of exList:
     var vals: seq[Value]
@@ -122,7 +125,8 @@ proc evalCommand(env: Env, cmd: Command, input: Value, interactive: bool): EvalR
     var argv: seq[string]
     let msg = evalArgv(env, cmd.args, argv)
     if msg != "": return cont(setExit(env, 1), failV(msg))
-    return runExternal(env, cmd.name, argv, input, interactive)
+    let name = if cmd.bareName: expandHome(cmd.name) else: cmd.name
+    return runExternal(env, name, argv, input, interactive)
   var pos: seq[Value]
   var flags: Flags
   let msg = evalArgs(env, cmd.args, pos, flags)

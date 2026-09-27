@@ -35,12 +35,8 @@ proc isBuiltin*(name: string): bool
 
 proc resolvePath(env: Env, path: string): string =
   if path == "": return env.cwd
-  let (hasHome, home) = homeDir()
-  if path == "~": return (if hasHome: home else: path)
-  if path.startsWith("/"): return path
-  if path.startsWith("~/"):
-    return (if hasHome: home / path[2 .. ^1] else: path)
-  env.cwd / path
+  let p = expandHome(path)
+  if p.startsWith("/"): p else: env.cwd / p
 
 proc flagSet(flags: Flags, name: string): bool =
   ## Present and not `false` / nothing.
@@ -1101,12 +1097,7 @@ proc whichMaybeFollow(follow: bool, path: string): string =
 
 proc pathDirArg(env: Env, v: Value): string =
   ## `~/bin`, `./bin`, `bin` → absolute directory path.
-  let raw = asString(v)
-  let (hasHome, home) = homeDir()
-  let p =
-    if raw == "~" and hasHome: home
-    elif raw.startsWith("~/") and hasHome: home / raw[2 .. ^1]
-    else: raw
+  let p = expandHome(asString(v))
   normalizedPath(if p.isAbsolute: p else: env.cwd / p)
 
 proc pathResult(env: Env): BuiltinResult =

@@ -154,6 +154,27 @@ suite "eval":
     check lexOk("rm -fr x")[1].short
     check not lexOk("rm --fr x")[1].short
 
+  test "unquoted ~ expands for externals; quoted stays literal":
+    let home = homeDir()[1]
+    let v = evalOk("^printf '%s,' ~ ~/x \"~/y\" '~' ~user a~b --dir ~/d")
+    check v.kind == vkString
+    check v.s.strip == home & "," & home & "/x,~/y,~,~user,a~b,--dir," & home & "/d,"
+    check evalOk("echo ~") == strV(home)
+
+  test "~/ command name runs from home":
+    let oldHome = getEnv("HOME")
+    let tmp = getTempDir() / "nimshell-tilde-test"
+    createDir(tmp / "bin")
+    writeFile(tmp / "bin" / "hi", "#!/bin/sh\necho tilde-ok\n")
+    setFilePermissions(tmp / "bin" / "hi", {fpUserRead, fpUserExec})
+    putEnv("HOME", tmp)
+    let v = evalOk("^~/bin/hi")
+    let w = evalOk("~/bin/hi")
+    putEnv("HOME", oldHome)
+    removeDir(tmp)
+    check v == strV("tilde-ok")
+    check w == strV("tilde-ok")
+
   test "let and var":
     let (e2, v) = evalEnv("let n = echo 7")
     check v == intV(7)

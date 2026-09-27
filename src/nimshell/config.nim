@@ -34,10 +34,7 @@ proc configFile*(): string =
 
 proc expandValue*(s: string): string =
   ## Expand a leading `~` and `$VAR` / `${VAR}` (unset vars become "").
-  var s = s
-  if s == "~" or s.startsWith("~/"):
-    let (ok, home) = homeDir()
-    if ok: s = home & s[1 .. ^1]
+  var s = expandHome(s)
   var i = 0
   while i < s.len:
     if s[i] == '$' and i + 1 < s.len:

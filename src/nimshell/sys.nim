@@ -76,6 +76,14 @@ proc homeDir*(): (bool, string) =
   if d == "": (false, "no home directory")
   else: (true, d.strip(leading = false, chars = {'/'}))
 
+proc expandHome*(p: string): string =
+  ## `~` → home, `~/x` → home/x. Anything else (incl. `~user`) is unchanged.
+  if p != "~" and not p.startsWith("~/"): return p
+  let (ok, home) = homeDir()
+  if not ok: p
+  elif p == "~": home
+  else: home / p[2 .. ^1]
+
 # --- which ---
 
 proc isExecutableFile(path: string): bool =

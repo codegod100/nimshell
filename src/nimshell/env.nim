@@ -19,11 +19,6 @@ proc isListEnvVar*(name: string): bool =
   ## Env vars exposed as lists (split on `:`), like Nushell's `PATH`.
   name == "PATH"
 
-proc expandTildePath(p: string): string =
-  if p == "~": getHomeDir().strip(leading = false, chars = {'/'})
-  elif p.startsWith("~/"): getHomeDir() / p[2 .. ^1]
-  else: p
-
 proc envFromString(name, s: string): Value =
   ## OS string → shell value (`PATH` becomes a list of directories).
   if isListEnvVar(name):
@@ -44,7 +39,7 @@ proc envToString*(name: string, value: Value): string =
       else: @[strV(asString(value))]
     for it in items:
       for part in asString(it).split(':'):
-        if part != "": parts.add expandTildePath(part)
+        if part != "": parts.add expandHome(part)
     parts.join(":")
   else:
     asString(value)

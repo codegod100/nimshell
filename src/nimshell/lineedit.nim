@@ -148,11 +148,6 @@ proc commandCompletions(word: string): seq[string] =
   for n in found: result.add n
   result.sort()
 
-proc expandHome(p: string): string =
-  if p == "~": getHomeDir().strip(leading = false, chars = {'/'})
-  elif p.startsWith("~/"): getHomeDir() / p[2 .. ^1]
-  else: p
-
 proc filenameCompletions(word: string): seq[string] =
   ## Sorted completion strings as typed (`~` preserved; dirs end in `/`).
   var listDir, base, insertPrefix: string
