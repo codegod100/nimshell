@@ -51,7 +51,7 @@ proc stringArgs(n: KdlNode, where: string, warnings: var seq[string]): seq[strin
     if a.kind == kkString: result.add expandValue(a.str)
     else: warnings.add("line " & $n.line & ": " & where & ": expected a string, got " & $a)
 
-proc updatePath(dirs: seq[string], prepend: bool) =
+proc updatePath*(dirs: seq[string], prepend: bool) =
   ## Add `dirs` to PATH (keeping their order); an entry already present
   ## moves to the requested end instead of being duplicated.
   var parts: seq[string]
@@ -94,12 +94,133 @@ proc applyConfig*(src: string): seq[string] =
     of "env": applyEnv(n, result)
     else: result.add("line " & $n.line & ": unknown setting `" & n.name & "`")
 
+proc addConfigPaths*(dirs: seq[string]): string
+
+proc migrateLegacyPaths(): seq[string] =
+  ## Early `add-path` saved dirs to `nimshell/paths`; fold them into config.kdl.
+  let legacy = configFile().parentDir / "paths"
+  if not fileExists(legacy): return
+  var dirs: seq[string]
+  try:
+    for line in readFile(legacy).splitLines:
+      if line.strip != "": dirs.add normalizedPath(expandValue(line.strip))
+  except IOError as e: return @[legacy & ": " & e.msg]
+  let e = addConfigPaths(dirs)
+  if e != "": return @[e]
+  try: removeFile(legacy)
+  except OSError: discard
+
 proc loadConfig*(): seq[string] =
   ## Apply the user's config file if it exists. Warnings are prefixed with
   ## the file path.
+  result = migrateLegacyPaths()
   let path = configFile()
   if not fileExists(path): return
   var src: string
   try: src = readFile(path)
   except IOError as e: return @[path & ": " & e.msg]
   for w in applyConfig(src): result.add(path & ": " & w)
+
+# --- `add-path` / `remove-path`: edit the `path` entries in config.kdl ---
+# Edits are textual so comments and formatting survive: `add-path` appends a
+# `path "dir"` line, `remove-path` deletes the matching string from its line.
+
+proc quoteKdl(s: string): string =
+  "\"" & s.multiReplace(("\\", "\\\\"), ("\"", "\\\"")) & "\""
+
+proc contractHome(dir: string): string =
+  ## `/home/me/bin` → `~/bin` so the config stays portable.
+  let (ok, home) = homeDir()
+  let h = home.strip(leading = false, chars = {'/'})
+  if ok and h != "" and dir == h: "~"
+  elif ok and h != "" and dir.startsWith(h & "/"): "~" & dir[h.len .. ^1]
+  else: dir
+
+type PathEntry = tuple[line: int, raw: string, dir: string]
+
+proc pathEntries(nodes: seq[KdlNode]): seq[PathEntry] =
+  ## Every string under a top-level `path` node (shorthand args and
+  ## `prepend` / `append` children), with its expanded directory.
+  proc collect(n: KdlNode, res: var seq[PathEntry]) =
+    for a in n.args:
+      if a.kind == kkString:
+        res.add((n.line, a.str, normalizedPath(expandValue(a.str))))
+  for n in nodes:
+    if n.name != "path": continue
+    collect(n, result)
+    for c in n.children:
+      if c.name in ["prepend", "append"]: collect(c, result)
+
+proc readConfig(src: var string, nodes: var seq[KdlNode]): string =
+  ## Load and parse config.kdl (missing file = empty); returns an error.
+  let path = configFile()
+  if fileExists(path):
+    try: src = readFile(path)
+    except IOError as e: return path & ": " & e.msg
+  try: nodes = parseKdl(src)
+  except KdlError as e: return path & ": " & e.msg & " (fix it before editing paths)"
+
+proc writeConfig(src: string): string =
+  let path = configFile()
+  try:
+    createDir(path.parentDir)
+    writeFile(path, src)
+  except IOError, OSError:
+    return "cannot write " & path & ": " & getCurrentExceptionMsg()
+
+proc configPathDirs*(): seq[string] =
+  ## Directories that config.kdl puts on PATH (expanded).
+  var src: string
+  var nodes: seq[KdlNode]
+  if readConfig(src, nodes) != "": return
+  for e in pathEntries(nodes):
+    if e.dir notin result: result.add e.dir
+
+proc addConfigPaths*(dirs: seq[string]): string =
+  ## Save `dirs` as `path "…"` lines (skipping ones already listed).
+  ## Returns an error message, or "".
+  var src: string
+  var nodes: seq[KdlNode]
+  let e = readConfig(src, nodes)
+  if e != "": return e
+  var known: seq[string]
+  for pe in pathEntries(nodes): known.add pe.dir
+  var added = false
+  for d in dirs:
+    if d in known: continue
+    known.add d
+    if src != "" and not src.endsWith("\n"): src.add "\n"
+    src.add "path " & quoteKdl(contractHome(d)) & "\n"
+    added = true
+  if added: writeConfig(src) else: ""
+
+proc removeConfigPaths*(dirs: seq[string]): string =
+  ## Remove `dirs` from the `path` entries in config.kdl. A line left with
+  ## only `path` / `prepend` / `append` is dropped. Returns an error message.
+  var src: string
+  var nodes: seq[KdlNode]
+  let e = readConfig(src, nodes)
+  if e != "": return e
+  var lines = src.split('\n')
+  var unedited: seq[int]
+  var changed = false
+  for pe in pathEntries(nodes):
+    if pe.dir notin dirs: continue
+    let i = pe.line - 1
+    let q = quoteKdl(pe.raw)
+    if i >= lines.len or q notin lines[i]:
+      unedited.add pe.line
+      continue
+    lines[i] = lines[i].replace(" " & q, "").replace(q, "")
+    changed = true
+  var kept: seq[string]
+  for l in lines:
+    let t = l.strip.strip(leading = false, chars = {';'}).strip
+    if t notin ["path", "prepend", "append"]: kept.add l
+  if changed:
+    let w = writeConfig(kept.join("\n"))
+    if w != "": return w
+  if unedited.len > 0:
+    return configFile() & ": could not edit line(s) " & unedited.join(", ") &
+           "; remove the entry by hand"
+  ""

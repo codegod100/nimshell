@@ -49,48 +49,6 @@ proc envToString*(name: string, value: Value): string =
   else:
     asString(value)
 
-# --- persisted user paths (like fish's `fish_add_path`) ---
-
-proc userPathsFile*(): string =
-  ## One directory per line; prepended to `PATH` at startup.
-  let cfg = getEnv("XDG_CONFIG_HOME")
-  let base = if cfg != "": cfg else: getHomeDir() / ".config"
-  base / "nimshell" / "paths"
-
-proc loadUserPaths*(): seq[string] =
-  try:
-    for line in readFile(userPathsFile()).splitLines:
-      let d = line.strip
-      if d != "" and not d.startsWith("#") and d notin result: result.add d
-  except IOError, OSError:
-    discard
-
-proc saveUserPaths*(dirs: seq[string]): (bool, string) =
-  let f = userPathsFile()
-  try:
-    createDir(f.parentDir)
-    writeFile(f, if dirs.len == 0: "" else: dirs.join("\n") & "\n")
-    (true, "")
-  except IOError, OSError:
-    (false, "cannot write " & f & ": " & getCurrentExceptionMsg())
-
-proc currentPathDirs*(): seq[string] =
-  for part in getEnv("PATH").split(':'):
-    if part != "": result.add part
-
-proc applyUserPaths*() =
-  ## Startup: put saved directories at the front of `PATH` (in file order),
-  ## dropping later duplicates so they take priority.
-  let user = loadUserPaths()
-  if user.len == 0: return
-  var dirs: seq[string]
-  for d in user:
-    let e = expandTildePath(d)
-    if e notin dirs: dirs.add e
-  for d in currentPathDirs():
-    if d notin dirs: dirs.add d
-  putEnv("PATH", dirs.join(":"))
-
 proc envRecord*(env: Env): Value =
   ## Process environment as a record (Nushell `$env`). `PWD` always reflects
   ## the shell cwd.

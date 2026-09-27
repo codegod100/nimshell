@@ -202,35 +202,40 @@ suite "eval":
     check rows == listV(@[strV("/a:/b")])
     putEnv("PATH", saved)
 
-  test "add-path / remove-path persist":
+  test "add-path / remove-path edit config.kdl":
     let savedPath = getEnv("PATH")
     let savedCfg = getEnv("XDG_CONFIG_HOME")
     let tmp = getTempDir() / "nimshell-addpath-test"
     removeDir(tmp)
     createDir(tmp / "bin")
     createDir(tmp / "bin2")
+    createDir(tmp / "cfg" / "nimshell")
     putEnv("XDG_CONFIG_HOME", tmp / "cfg")
+    let cfg = configFile()
+    writeFile(cfg, "// keep me\npath {\n    append \"/opt/x\"\n}\n")
     putEnv("PATH", "/usr/bin:/bin")
     let v = evalOk("add_to_path " & (tmp / "bin"))
     check v.kind == vkList and v.items[0] == strV(tmp / "bin")
     check getEnv("PATH") == (tmp / "bin") & ":/usr/bin:/bin"
-    check loadUserPaths() == @[tmp / "bin"]
-    # already on PATH: no duplicate, stays saved once
+    check readFile(cfg) == "// keep me\npath {\n    append \"/opt/x\"\n}\npath \"" &
+      (tmp / "bin") & "\"\n"
+    # already saved: no duplicate line
     discard evalOk("add-path " & (tmp / "bin"))
-    check getEnv("PATH") == (tmp / "bin") & ":/usr/bin:/bin"
-    check loadUserPaths() == @[tmp / "bin"]
+    check configPathDirs() == @["/opt/x", tmp / "bin"]
     # --no-save changes PATH only
     discard evalOk("add-path --no-save " & (tmp / "bin2"))
     check getEnv("PATH").startsWith((tmp / "bin2") & ":")
-    check loadUserPaths() == @[tmp / "bin"]
+    check configPathDirs() == @["/opt/x", tmp / "bin"]
     check evalOk("add-path " & (tmp / "missing")).kind == vkFail
-    # new session: saved dirs are prepended, duplicates dropped
-    putEnv("PATH", "/usr/bin:" & (tmp / "bin"))
-    applyUserPaths()
-    check getEnv("PATH") == (tmp / "bin") & ":/usr/bin"
-    discard evalOk("remove-path " & (tmp / "bin"))
-    check getEnv("PATH") == "/usr/bin"
-    check loadUserPaths().len == 0
+    # removal drops the line and the dir inside the block
+    discard evalOk("remove-path " & (tmp / "bin") & " /opt/x")
+    check (tmp / "bin") notin getEnv("PATH").split(':')
+    check readFile(cfg) == "// keep me\npath {\n}\n"
+    # legacy `paths` file migrates into config.kdl
+    writeFile(tmp / "cfg" / "nimshell" / "paths", (tmp / "bin2") & "\n")
+    check loadConfig().len == 0
+    check not fileExists(tmp / "cfg" / "nimshell" / "paths")
+    check configPathDirs() == @[tmp / "bin2"]
     putEnv("PATH", savedPath)
     putEnv("XDG_CONFIG_HOME", savedCfg)
     removeDir(tmp)

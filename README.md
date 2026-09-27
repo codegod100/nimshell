@@ -149,6 +149,9 @@ path {
   already on `PATH` moves instead of being duplicated.
 - Values expand a leading `~` and `$VAR` / `${VAR}`. Nodes apply in file
   order, so `path` can use variables set by an earlier `env`.
+- `add-path <dir>` appends a `path "<dir>"` line (home written as `~`) unless
+  the directory is already listed; `remove-path <dir>` deletes it from
+  whichever `path` entry lists it. Other lines and comments are left alone.
 - Mistakes (bad KDL, unknown settings) print a warning to stderr; the shell
   still starts.
 
@@ -189,9 +192,9 @@ $env.HOME
 $env.PATH                     # a list of directories (joined with `:` for externals)
 $env.PATH = $env.PATH | append ~/.local/bin
 $PATH = $PATH | prepend ~/bin # `$PATH` is shorthand for `$env.PATH`
-add-path ~/.local/bin         # like fish_add_path: prepend + remember for new sessions
+add-path ~/.local/bin         # like fish_add_path: prepend + save to config.kdl
 add-path --no-save ./bin      # this session only
-remove-path ~/.local/bin      # undo (also forgets it)
+remove-path ~/.local/bin      # undo (also removes it from config.kdl)
 $env.MY_VAR = hello
 echo $env.MY_VAR
 
@@ -267,9 +270,6 @@ pagers forced to `cat` (plus `FORCE_COLOR` / `CLICOLOR_FORCE` and a git
 **same builtin pager** when the text does not fit on one screen.
 
 Unknown command names fall through to external executables on `PATH`.
-Directories saved with `add-path` live in `$XDG_CONFIG_HOME/nimshell/paths`
-(default `~/.config/nimshell/paths`, one per line) and are prepended to `PATH`
-when nimshell starts.
 
 ## Layout
 
