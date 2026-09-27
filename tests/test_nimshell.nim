@@ -693,10 +693,12 @@ suite "self-update":
     check not isNewer("v0.2.0", "0.2.0")
     check not isNewer("v0.1.9", "0.2.0")
     check not isNewer("v0.2.0", "0.2.0-dev") # pre-release suffix ignored
-  test "release tag from redirect":
-    check tagFromLocation("https://github.com/o/r/releases/tag/v1.2.3") == "v1.2.3"
-    check tagFromLocation("https://github.com/o/r/releases") == ""
-    check tagFromLocation("") == ""
+  test "version asset":
+    check versionFromAsset("0.2.14\n") == "0.2.14"
+    check versionFromAsset("v0.2.14") == "0.2.14"
+    check versionFromAsset("") == ""
+    check versionFromAsset("<html>Not Found</html>") == ""
+    check releaseUrl("VERSION").endsWith("/releases/download/release/VERSION")
   test "asset name":
     check assetName("x86_64") == "nimshell-x86_64.AppImage"
   test "AppImage magic check":

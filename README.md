@@ -41,7 +41,7 @@ the config).
 ### AppImage (self-updating)
 
 Download `nimshell-x86_64.AppImage` from the
-[latest release](https://github.com/codegod100/nimshell/releases/latest), then:
+[`release` release](https://github.com/codegod100/nimshell/releases/tag/release), then:
 
 ```bash
 chmod +x nimshell-x86_64.AppImage
@@ -65,8 +65,9 @@ to date:
   (`gh-releases-zsync`), so AppImageUpdate / `appimageupdatetool` can do delta
   updates with the published `.zsync` file.
 
-Update checks use the `github.com/…/releases/latest` redirect, not the GitHub
-API, so they are not subject to API rate limits; `HTTPS_PROXY` / `NO_PROXY` are
+Every build is published to the single rolling `release` tag (its assets are
+replaced each time). Update checks download that release's small `VERSION`
+file, not the GitHub API, so they are not subject to API rate limits; `HTTPS_PROXY` / `NO_PROXY` are
 honored.
 
 ### From source
