@@ -160,6 +160,8 @@ path {
 - `add-path <dir>` appends a `path "<dir>"` line (home written as `~`) unless
   the directory is already listed; `remove-path <dir>` deletes it from
   whichever `path` entry lists it. Other lines and comments are left alone.
+- `config edit` opens the file in `$VISUAL` / `$EDITOR` (fallback `vi`) and
+  re-applies it when the editor exits; `config path` prints its location.
 - Mistakes (bad KDL, unknown settings) print a warning to stderr; the shell
   still starts.
 
@@ -302,7 +304,7 @@ Table/list: `where`/`filter`, `find`, `select`, `get`, `first`, `last`, `take`,
 
 Data: `echo`, `range`, `lines`, `input` (multi-line paste / stdin until Ctrl+D),
 `to`/`from` (subcommands `json`, `jwt`), `type`, `describe`, `env`, `sys`, `ps`,
-`whyport`, `now`, `which`, `aliases`, `export`, `add-path` (alias `add_to_path`), `remove-path`, `help`, `about`, `exit`
+`whyport`, `now`, `which`, `aliases`, `export`, `add-path` (alias `add_to_path`), `remove-path`, `config`, `help`, `about`, `exit`
 
 HTTP: `http get|post|put|delete|patch|head` — fetch/send with structured JSON
 bodies and responses (`http get https://example.com`, `http post URL {a: 1}`,

@@ -878,6 +878,28 @@ suite "config":
     putEnv("XDG_CONFIG_HOME", "/cfg")
     check configFile() == "/cfg/nimshell/config.kdl"
     if saved == "": delEnv("XDG_CONFIG_HOME") else: putEnv("XDG_CONFIG_HOME", saved)
+  test "config edit / path":
+    let savedCfg = getEnv("XDG_CONFIG_HOME")
+    let savedVisual = getEnv("VISUAL")
+    let savedEditor = getEnv("EDITOR")
+    let tmp = getTempDir() / "nimshell-config-edit-test"
+    removeDir(tmp)
+    putEnv("XDG_CONFIG_HOME", tmp)
+    check evalOk("config path") == strV(tmp / "nimshell" / "config.kdl")
+    # the "editor" appends an alias; the config is reloaded afterwards
+    delEnv("VISUAL")
+    putEnv("EDITOR", "printf 'alias cfgedit \"ls\"\\n' >>")
+    check evalOk("config edit").kind == vkNothing
+    check readFile(configFile()) == "alias cfgedit \"ls\"\n"
+    check isAlias("cfgedit")
+    putEnv("VISUAL", "false")
+    check evalOk("config edit").kind == vkFail
+    check evalOk("config").kind == vkFail
+    check evalOk("config nope").kind == vkFail
+    for (k, v) in [("XDG_CONFIG_HOME", savedCfg), ("VISUAL", savedVisual), ("EDITOR", savedEditor)]:
+      if v == "": delEnv(k) else: putEnv(k, v)
+    clearAliases()
+    removeDir(tmp)
 
 suite "prompt config":
   teardown: promptConfig = defaultPromptConfig()
