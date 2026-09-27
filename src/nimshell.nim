@@ -3,7 +3,7 @@
 
 import std/[os, strutils, times]
 import std/monotimes
-import nimshell/[display, env, eval, lineedit, pager, prompt, sys, update, value]
+import nimshell/[config, display, env, eval, lineedit, pager, prompt, sys, update, value]
 
 proc printUsage() =
   println(@[
@@ -37,9 +37,14 @@ proc printValue(v: Value, allowPage: bool) =
   if allowPage and needsPaging(text): pager.run(text)
   else: println(text)
 
+proc applyUserConfig() =
+  ## Apply `config.kdl` (PATH, env). Problems are reported, never fatal.
+  for w in loadConfig(): printlnErr("nimshell: config: " & w)
+
 # --- modes ---
 
 proc runOnce(code: string) =
+  applyUserConfig()
   applyUserPaths()
   let r = evalSource(newEnv(), code)
   case r.kind
@@ -50,6 +55,7 @@ proc runOnce(code: string) =
 
 proc repl() =
   installSigint()
+  applyUserConfig()
   loadHistory()
   println("nimshell " & NimshellVersion & " — structured data shell (type `help`, `exit` to quit; " &
           "Tab completes, grey history hints, Ctrl+R fuzzy history)")
