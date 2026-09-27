@@ -157,6 +157,22 @@ path {
 - Mistakes (bad KDL, unknown settings) print a warning to stderr; the shell
   still starts.
 
+Aliases name a command or a whole pipeline:
+
+```kdl
+aliases {
+    ll "ls -l"
+    gs "^git status --short"
+    dirs "ls | where type == dir"
+}
+alias big "ls | where size > 10000000"    // one-liner form
+```
+
+Words typed after an alias are appended to its last command (`ll src` runs
+`ls -l src`). An alias can use other aliases or wrap the command it shadows
+(`ls "ls -l"`), and `^name` always skips aliases. `aliases` lists them and
+`which <name>` shows an alias's expansion.
+
 The `prompt` block customizes the prompt. Every setting is optional; the values
 below are the defaults:
 
@@ -278,7 +294,7 @@ Table/list: `where`/`filter`, `find`, `select`, `get`, `first`, `last`, `take`,
 
 Data: `echo`, `range`, `lines`, `input` (multi-line paste / stdin until Ctrl+D),
 `to`/`from` (subcommands `json`, `jwt`), `type`, `describe`, `env`, `sys`, `ps`,
-`whyport`, `now`, `which`, `add-path` (alias `add_to_path`), `remove-path`, `help`, `about`, `exit`
+`whyport`, `now`, `which`, `aliases`, `add-path` (alias `add_to_path`), `remove-path`, `help`, `about`, `exit`
 
 HTTP: `http get|post|put|delete|patch|head` — fetch/send with structured JSON
 bodies and responses (`http get https://example.com`, `http post URL {a: 1}`,
