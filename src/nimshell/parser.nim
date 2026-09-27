@@ -14,7 +14,9 @@ type
     of exLit:
       lit*: Value
       bare*: bool ## unquoted word: a leading `~` expands to home at eval
-    of exVar: name*: string
+    of exVar:
+      name*: string
+      suffix*: string ## path tail glued on at eval: `$HOME/x` → name HOME, suffix `/x`
     of exList: items*: seq[Expr]
     of exRecord: fields*: seq[(string, Expr)]
 
@@ -63,7 +65,7 @@ proc `==`*(a, b: Expr): bool {.noSideEffect.} =
   if a.kind != b.kind: return false
   case a.kind
   of exLit: a.lit == b.lit
-  of exVar: a.name == b.name
+  of exVar: a.name == b.name and a.suffix == b.suffix
   of exList: a.items == b.items
   of exRecord: a.fields == b.fields
 
@@ -152,7 +154,14 @@ proc parseExpr(c: var Cursor): Expr =
     let n = c.peek(1)
     if n.kind != tkIdent: fail("expected variable name after $")
     c.pos += 2
-    Expr(kind: exVar, name: n.text)
+    # `/` is a word char for paths, so `$HOME/x` lexes as one ident; the
+    # variable name stops at the first `/` and the rest is a path suffix.
+    let slash = n.text.find('/')
+    if slash == 0: fail("expected variable name after $")
+    if slash > 0:
+      Expr(kind: exVar, name: n.text[0 ..< slash], suffix: n.text[slash .. ^1])
+    else:
+      Expr(kind: exVar, name: n.text)
   of tkLBracket: inc c.pos; parseList(c)
   of tkLBrace: inc c.pos; parseRecord(c)
   of tkIdent: inc c.pos; lit(strV(t.text), bare = true)
