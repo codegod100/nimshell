@@ -27,9 +27,17 @@ proc nimbleVersion(): string {.compileTime.} =
       return l[l.find('"') + 1 ..< l.rfind('"')]
   "0.0.0"
 
+proc gitCommit(): string {.compileTime.} =
+  ## SHA of the checked-out commit ("" outside a git checkout).
+  let sha = staticExec("git -C " & quoteShell(currentSourcePath().parentDir) &
+                       " rev-parse HEAD 2>/dev/null").strip
+  if sha.len == 40 and sha.allCharsInSet(HexDigits): sha else: ""
+
 const
   NimshellVersion* {.strdefine.} = nimbleVersion()
     ## From nimshell.nimble; release builds pass `-d:NimshellVersion=<tag>`.
+  NimshellCommit* {.strdefine.} = gitCommit()
+    ## Git SHA the build was made from; release builds pass `-d:NimshellCommit=<sha>`.
   UpdateRepo* {.strdefine.} = "codegod100/nimshell"
   UpdateHost* {.strdefine.} = "https://github.com"
     ## Only changed by the end-to-end test, which serves releases locally.

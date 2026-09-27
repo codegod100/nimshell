@@ -59,7 +59,8 @@ to date:
   and prints `✨ nimshell updated a → b` once.
 - `self-update` (builtin) or `nimshell --self-update` updates right away;
   add `--check` to only report whether an update exists.
-- `version` shows the running version and whether auto-update is active.
+- `version` shows the running version, the git commit (SHA) it was built from, and
+  whether auto-update is active.
 - Set `NIMSHELL_NO_UPDATE=1` to turn off the background check.
 - The image also carries standard AppImage update information
   (`gh-releases-zsync`), so AppImageUpdate / `appimageupdatetool` can do delta
