@@ -736,6 +736,8 @@ suite "self-update":
       check not autoUpdateEnabled()
     let v = evalOk("version")
     check field(v, "version") == strV(NimshellVersion)
+    check NimshellCommit.len == 40
+    check field(v, "commit") == strV(NimshellCommit)
     check evalOk("which self-update") == strV("builtin: self-update")
     check "--check" in evalOk("help self-update").s
   test "proxy from environment":

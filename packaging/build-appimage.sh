@@ -15,6 +15,7 @@ cd "$(dirname "$0")/.."
 VERSION="${1:-$(sed -n 's/^version *= *"\(.*\)"/\1/p' nimshell.nimble)}"
 VERSION="${VERSION#v}"
 REPO="${NIMSHELL_REPO:-codegod100/nimshell}"
+COMMIT="${GITHUB_SHA:-$(git rev-parse HEAD 2>/dev/null || true)}"
 ARCH="$(uname -m)"
 APPDIR="build/AppDir"
 LIBDIR="/usr/lib/${ARCH}-linux-gnu"
@@ -24,7 +25,7 @@ mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/lib" dist
 
 echo ">> building nimshell $VERSION ($ARCH)"
 nim c -d:release --hints:off \
-  -d:NimshellVersion="$VERSION" -d:UpdateRepo="$REPO" \
+  -d:NimshellVersion="$VERSION" -d:NimshellCommit="$COMMIT" -d:UpdateRepo="$REPO" \
   -o:"$APPDIR/usr/bin/nimshell" src/nimshell.nim
 
 # nimshell dlopen()s PCRE (find --regex) and OpenSSL (http, self-update).

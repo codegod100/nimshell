@@ -1374,6 +1374,7 @@ proc cmdAliases(env: Env, input: Value, args: seq[Value], flags: Flags): Builtin
 proc cmdVersion(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinResult =
   let image = appImagePath()
   ok(env, recordV(@[("version", strV(NimshellVersion)),
+                    ("commit", if NimshellCommit != "": strV(NimshellCommit) else: nothing()),
                     ("nim", strV(NimVersion)),
                     ("arch", strV(archName())),
                     ("appimage", if image != "": strV(image) else: nothing()),
