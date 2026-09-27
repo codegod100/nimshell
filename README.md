@@ -161,7 +161,9 @@ echo $n
 
 # process environment (Nushell-style)
 $env.HOME
-$env | get PATH
+$env.PATH                     # a list of directories (joined with `:` for externals)
+$env.PATH = $env.PATH | append ~/.local/bin
+$PATH = $PATH | prepend ~/bin # `$PATH` is shorthand for `$env.PATH`
 $env.MY_VAR = hello
 echo $env.MY_VAR
 
@@ -196,7 +198,7 @@ now
 | Lists | `[1 2 3]` |
 | Records | `{name: alice, age: 30}` |
 | Variables | `let x = …` then `$x` (pipeline input is `$in`) |
-| Env | `$env`, `$env.HOME`, `$env.FOO = value` |
+| Env | `$env`, `$env.HOME`, `$env.FOO = value`; `$env.PATH` / `$PATH` is a list (`$PATH = $PATH \| append ~/bin`) |
 | Flags | `--flag` / `--flag value` |
 | Force external | `^command args…` |
 | Comments | `# …` (word-boundary only; mid-token `#` is fine — `nixpkgs#pkg`) |

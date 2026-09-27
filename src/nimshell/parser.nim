@@ -276,6 +276,10 @@ proc parseStatement(c: var Cursor): Statement =
       if key == "": fail("expected environment variable name after $env.")
       c.pos += 3
       return Statement(kind: stEnvAssign, name: key, pipeline: parseAssignRhs(c))
+    if t1.text == "PATH":
+      # `$PATH = …` — shorthand for `$env.PATH = …`
+      c.pos += 3
+      return Statement(kind: stEnvAssign, name: t1.text, pipeline: parseAssignRhs(c))
     fail("only `$env.NAME = …` assignment is supported (use `let name = …` for shell vars)")
   Statement(kind: stExpr, pipeline: parsePipeline(c))
 

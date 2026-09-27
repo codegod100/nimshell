@@ -1085,7 +1085,7 @@ proc cmdEnv(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinResu
     # Process environment (same data as `$env`), as a name/value table
     var rows: seq[Value]
     for (k, v) in envRecord(env).fields:
-      rows.add recordV(@[("name", strV(k)), ("value", strV(asString(v)))])
+      rows.add recordV(@[("name", strV(k)), ("value", strV(envToString(k, v)))])
     return ok(env, tableFromRecords(rows))
   err(env, "env: unexpected args (use `env` or `env NAME`)")
 
