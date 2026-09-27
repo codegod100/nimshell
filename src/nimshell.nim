@@ -3,7 +3,7 @@
 
 import std/[os, strutils, times]
 import std/monotimes
-import nimshell/[display, env, eval, lineedit, pager, prompt, sys, value]
+import nimshell/[display, env, eval, lineedit, pager, prompt, sys, update, value]
 
 proc printUsage() =
   println(@[
@@ -13,6 +13,9 @@ proc printUsage() =
     "  nimshell              Interactive REPL",
     "  nimshell -c <code>    Evaluate a one-liner",
     "  nimshell <code>…      Evaluate remaining args as code",
+    "  nimshell --version    Print the version",
+    "  nimshell --self-update [--check]",
+    "                        Update the AppImage to the latest release",
     "",
     "Examples:",
     "  nimshell -c 'ls | where type == file | first 5'",
@@ -47,8 +50,13 @@ proc runOnce(code: string) =
 proc repl() =
   installSigint()
   loadHistory()
-  println("nimshell 0.1 — structured data shell (type `help`, `exit` to quit; " &
+  println("nimshell " & NimshellVersion & " — structured data shell (type `help`, `exit` to quit; " &
           "Tab completes, grey history hints, Ctrl+R fuzzy history)")
+  # AppImage: announce an update installed by a previous session's background
+  # check, then maybe start today's check (detached; takes effect next launch).
+  let notice = takeNotice()
+  if notice != "": println("✨ " & notice)
+  maybeBackgroundUpdate()
   var env = newEnv()
   var lastDurationMs = 0'i64
   pushTitle()
@@ -87,6 +95,14 @@ when isMainModule:
     repl()
   elif args.len == 1 and args[0] in ["-h", "--help", "help"]:
     printUsage()
+  elif args.len == 1 and args[0] in ["-V", "--version"]:
+    println("nimshell " & NimshellVersion)
+  elif args[0] == "--self-update":
+    let quiet = "--quiet" in args
+    let r = selfUpdate(checkOnly = "--check" in args)
+    if not quiet:
+      if r.ok: println(r.message) else: printlnErr("nimshell: " & r.message)
+    quit(if r.ok: 0 else: 1)
   elif args[0] == "-c":
     if args.len < 2:
       printlnErr("nimshell: -c requires a command string")

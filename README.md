@@ -36,6 +36,39 @@ branch icon and the `` terminal prompt character.
 
 ## Quick start
 
+### AppImage (self-updating)
+
+Download `nimshell-x86_64.AppImage` from the
+[latest release](https://github.com/codegod100/nimshell/releases/latest), then:
+
+```bash
+chmod +x nimshell-x86_64.AppImage
+./nimshell-x86_64.AppImage                 # interactive REPL
+./nimshell-x86_64.AppImage -c 'ls | first 3'
+```
+
+The AppImage bundles its runtime libraries (PCRE, OpenSSL) and keeps itself up
+to date:
+
+- The interactive shell checks for a newer release **at most once a day**, in a
+  detached background process. If there is one, it downloads it, checks that it
+  is a valid AppImage and that it reports the new version (`--version`), then
+  atomically replaces the AppImage file. The next launch runs the new version
+  and prints `✨ nimshell updated a → b` once.
+- `self-update` (builtin) or `nimshell --self-update` updates right away;
+  add `--check` to only report whether an update exists.
+- `version` shows the running version and whether auto-update is active.
+- Set `NIMSHELL_NO_UPDATE=1` to turn off the background check.
+- The image also carries standard AppImage update information
+  (`gh-releases-zsync`), so AppImageUpdate / `appimageupdatetool` can do delta
+  updates with the published `.zsync` file.
+
+Update checks use the `github.com/…/releases/latest` redirect, not the GitHub
+API, so they are not subject to API rate limits; `HTTPS_PROXY` / `NO_PROXY` are
+honored.
+
+### From source
+
 Requires Nim ≥ 1.6 (tested with 1.6 and 2.2). The `find --regex` builtin uses
 PCRE (`libpcre3`), and `http` uses OpenSSL; both are loaded at runtime.
 
@@ -44,7 +77,21 @@ nimble build                     # produces ./nimshell
 ./nimshell                       # interactive REPL
 ./nimshell -c 'ls | first 3'     # one-shot
 nimble test                      # run the test suite
+packaging/build-appimage.sh      # dist/nimshell-<arch>.AppImage (+ .zsync)
 ```
+
+### Releasing
+
+Bump `version` in `nimshell.nimble`, commit, then push a tag:
+
+```bash
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+The `appimage` workflow builds the AppImage on Ubuntu 22.04 (for broad glibc
+compatibility), smoke-tests it, and publishes it with its `.zsync` to the GitHub
+release. Every other push and pull request builds the AppImage as a workflow
+artifact without publishing.
 
 ### REPL editing
 
@@ -201,7 +248,11 @@ src/
     lineedit.nim          # raw line editor, history, completion, Ctrl+R
     syntax.nim            # file language detect + cat highlighters
     prompt.nim            # Starship-inspired prompt (git status, duration)
+    update.nim            # AppImage self-update
+    netclient.nim         # HTTP client setup (TLS, proxies)
     env.nim / sys.nim / term.nim
+packaging/
+  build-appimage.sh       # AppDir + bundled libs + appimagetool
 tests/
   test_nimshell.nim       # ported from gleshell's test suite
 ```

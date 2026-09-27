@@ -3,3 +3,5 @@
 /tests/test_nimshell
 nimcache/
 *.exe
+build/
+dist/

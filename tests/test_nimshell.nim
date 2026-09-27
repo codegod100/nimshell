@@ -2,7 +2,8 @@
 
 import std/[options, os, strutils, unittest]
 import ../src/nimshell/[builtins, color, display, env, eval, highlight, lexer,
-                        lineedit, pager, parser, prompt, syntax, sys, value]
+                        lineedit, netclient, pager, parser, prompt, syntax, sys,
+                        update, value]
 
 proc evalOk(src: string, e = newEnv()): Value =
   let r = evalSource(e, src)
@@ -618,3 +619,50 @@ suite "pager chop mode (less -S)":
     check evalOk("less -S " & path) == strV("short\n")
     removeFile(path)
     check "--chop-long-lines" in evalOk("help less").s
+
+suite "self-update":
+  test "version comparison":
+    check parseVersion("v1.2.3") == @[1, 2, 3]
+    check parseVersion("0.2.0-rc1") == @[0, 2, 0]
+    check isNewer("v0.2.0", "0.1.0")
+    check isNewer("v0.10.0", "0.9.9")
+    check isNewer("1.0", "0.9.9")
+    check not isNewer("v0.2.0", "0.2.0")
+    check not isNewer("v0.1.9", "0.2.0")
+    check not isNewer("v0.2.0", "0.2.0-dev") # pre-release suffix ignored
+  test "release tag from redirect":
+    check tagFromLocation("https://github.com/o/r/releases/tag/v1.2.3") == "v1.2.3"
+    check tagFromLocation("https://github.com/o/r/releases") == ""
+    check tagFromLocation("") == ""
+  test "asset name":
+    check assetName("x86_64") == "nimshell-x86_64.AppImage"
+  test "AppImage magic check":
+    let path = getTempDir() / "nimshell_fake.AppImage"
+    writeFile(path, "\x7fELF\x02\x01\x01\x00AI\x02rest")
+    check looksLikeAppImage(path)
+    writeFile(path, "<html>not found</html>")
+    check not looksLikeAppImage(path)
+    removeFile(path)
+    check not looksLikeAppImage(path)
+  test "not running from an AppImage":
+    if getEnv("APPIMAGE") == "":
+      check appImagePath() == ""
+      check not autoUpdateEnabled()
+    let v = evalOk("version")
+    check field(v, "version") == strV(NimshellVersion)
+    check evalOk("which self-update") == strV("builtin: self-update")
+    check "--check" in evalOk("help self-update").s
+  test "proxy from environment":
+    let saved = (getEnv("HTTPS_PROXY"), getEnv("https_proxy"), getEnv("NO_PROXY"),
+                 getEnv("no_proxy"), getEnv("ALL_PROXY"), getEnv("all_proxy"))
+    for n in ["HTTPS_PROXY", "https_proxy", "NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy"]:
+      delEnv(n)
+    check proxyFromEnv("https://github.com/x").isNil
+    putEnv("HTTPS_PROXY", "127.0.0.1:3128")
+    check not proxyFromEnv("https://github.com/x").isNil
+    putEnv("NO_PROXY", "localhost,.github.com")
+    check proxyFromEnv("https://api.github.com/x").isNil
+    check not proxyFromEnv("https://example.com/").isNil
+    for (n, v) in [("HTTPS_PROXY", saved[0]), ("https_proxy", saved[1]), ("NO_PROXY", saved[2]),
+                   ("no_proxy", saved[3]), ("ALL_PROXY", saved[4]), ("all_proxy", saved[5])]:
+      if v == "": delEnv(n) else: putEnv(n, v)

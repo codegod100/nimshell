@@ -3,7 +3,7 @@
 import std/[algorithm, base64, httpclient, json, net, options, os, strutils,
             tables, times, uri]
 from std/unicode import runes, `$`, validateUtf8, toLower
-import color, display, env, pager, syntax, sys, value
+import color, display, env, netclient, pager, syntax, sys, update, value
 
 type
   BuiltinResultKind* = enum
@@ -197,6 +197,8 @@ proc helpText(): Table[string, string] =
     "whyport": "whyport [-a|--all] [-l|--long] <port> — who is bound to a TCP/UDP port",
     "now": "now — current time as Unix epoch seconds (prints as local datetime)",
     "about": "about — authorship, ATProto handle, and a little sparkle",
+    "self-update": "self-update [--check] — update the nimshell AppImage to the latest release",
+    "version": "version — nimshell version and build info",
     "less": "less [-S] [file]… — page pipeline input or files (ANSI colors kept)",
   }.toTable
 
@@ -1032,11 +1034,7 @@ proc cmdHttp(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinRes
     except ValueError: discard
   var client: HttpClient
   try:
-    when defined(ssl):
-      let ctx = newContext(verifyMode = if insecure: CVerifyNone else: CVerifyPeer)
-      client = newHttpClient(timeout = timeoutMs, sslContext = ctx, headers = headers)
-    else:
-      client = newHttpClient(timeout = timeoutMs, headers = headers)
+    client = newShellClient(url, timeoutMs, headers, insecure)
   except CatchableError as e:
     return err(env, "http: " & methodName & ": " & e.msg)
   defer: client.close()
@@ -1312,6 +1310,23 @@ proc cmdLess(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinRes
     # prints it once.
     ok(env, strV(text))
 
+# --- self-update / version ---
+
+proc cmdSelfUpdate(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinResult =
+  let (check, _) = findBoolFlag(flags, ["check", "c"])
+  let r = selfUpdate(checkOnly = check)
+  if not r.ok: return err(env, "self-update: " & r.message)
+  if r.updated: ok(env, strV(r.message & " (restart nimshell to use it)"))
+  else: ok(env, strV(r.message))
+
+proc cmdVersion(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinResult =
+  let image = appImagePath()
+  ok(env, recordV(@[("version", strV(NimshellVersion)),
+                    ("nim", strV(NimVersion)),
+                    ("arch", strV(archName())),
+                    ("appimage", if image != "": strV(image) else: nothing()),
+                    ("auto_update", boolV(autoUpdateEnabled()))]))
+
 # --- about ---
 
 proc cmdAbout(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinResult =
@@ -1398,6 +1413,8 @@ let registryTable = {
   "now": cmdNow,
   "about": cmdAbout,
   "less": cmdLess,
+  "self-update": cmdSelfUpdate,
+  "version": cmdVersion,
 }.toTable
 
 proc lookup*(name: string, b: var Builtin): bool =

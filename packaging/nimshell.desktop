@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=nimshell
+Comment=Structured-data shell inspired by Nushell
+Exec=nimshell
+Icon=nimshell
+Terminal=true
+Categories=System;Utility;

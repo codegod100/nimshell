@@ -1,0 +1,48 @@
+name: appimage
+
+# Every push/PR builds and smoke-tests the AppImage (uploaded as a workflow
+# artifact). Pushing a `v*` tag also publishes a GitHub release with the
+# AppImage + .zsync, which is what `self-update` and AppImageUpdate pull.
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  appimage:
+    # Oldest supported runner → oldest glibc → runs on the most distros.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: "2.2.x"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install packaging tools
+        run: sudo apt-get update && sudo apt-get install -y patchelf zsync libpcre3 libssl3
+      - name: Version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            base=$(sed -n 's/^version *= *"\(.*\)"/\1/p' nimshell.nimble)
+            echo "version=${base}-dev+${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Build AppImage
+        run: packaging/build-appimage.sh "${{ steps.version.outputs.version }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nimshell-x86_64.AppImage
+          path: dist/*
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
