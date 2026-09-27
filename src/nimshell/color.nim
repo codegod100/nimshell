@@ -1,6 +1,6 @@
 ## Nushell-inspired ANSI colors for structured values.
 
-import std/os
+import std/[os, strutils]
 import term
 
 const
@@ -42,7 +42,7 @@ proc enabled*(): bool =
 
 proc paint*(on: bool, code, text: string): string =
   ## Wrap `text` in an ANSI code when colors are on.
-  if on: code & text & reset else: text
+  if on and code != "": code & text & reset else: text
 
 proc header*(on: bool, text: string): string = paint(on, boldGreen, text)
 proc key*(on: bool, text: string): string = paint(on, boldGreen, text)
@@ -130,3 +130,32 @@ proc stripAnsi*(s: string): string =
   ## Drop ANSI/VT escape sequences, leaving only visible text.
   for (start, n, esc) in ansiScan(s):
     if not esc: result.add s[start ..< start + n]
+
+proc parseStyle*(spec: string, code: var string): bool =
+  ## Parse a style like `bold cyan`, `dim bright-blue`, `italic #ff8800` or
+  ## `none` into an SGR escape. Returns false on an unknown word.
+  const names = ["black", "red", "green", "yellow", "blue", "purple", "cyan", "white"]
+  var parts: seq[string]
+  for w in spec.toLowerAscii.splitWhitespace:
+    case w
+    of "none", "plain": discard
+    of "bold": parts.add "1"
+    of "dim": parts.add "2"
+    of "italic": parts.add "3"
+    of "underline": parts.add "4"
+    else:
+      var name = if w == "magenta": "purple" else: w
+      var base = 30
+      if name.startsWith("bright-"):
+        base = 90
+        name = name[7 .. ^1]
+        if name == "magenta": name = "purple"
+      let i = names.find(name)
+      if i >= 0:
+        parts.add $(base + i)
+      elif w.len == 7 and w[0] == '#' and w[1 .. ^1].allCharsInSet(HexDigits):
+        parts.add "38;2;" & $fromHex[int](w[1 .. 2]) & ";" & $fromHex[int](w[3 .. 4]) &
+                  ";" & $fromHex[int](w[5 .. 6])
+      else: return false
+  code = if parts.len == 0: "" else: "\e[" & parts.join(";") & "m"
+  true

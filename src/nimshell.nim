@@ -38,7 +38,7 @@ proc printValue(v: Value, allowPage: bool) =
   else: println(text)
 
 proc applyUserConfig() =
-  ## Apply `config.kdl` (PATH, env). Problems are reported, never fatal.
+  ## Apply `config.kdl` (PATH, env, prompt). Problems are reported, never fatal.
   for w in loadConfig(): printlnErr("nimshell: config: " & w)
 
 # --- modes ---
