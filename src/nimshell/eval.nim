@@ -154,7 +154,8 @@ proc evalStatement(env: Env, stmt: Statement): EvalResult =
     let r = evalPipeline(env, stmt.pipeline, nothing(), false)
     if r.kind == erQuit or r.value.kind == vkFail: return r
     let (ok, env3, msg) = setOsEnv(r.env, stmt.name, r.value)
-    if ok: cont(setExit(env3, 0), r.value)
+    # Echo what was stored (`~` expanded, `PATH` re-split into a list).
+    if ok: cont(setExit(env3, 0), getVar(env3, "env." & stmt.name))
     else: cont(setExit(r.env, 1), failV(msg))
   of stExpr:
     # Bare expression: last stage gets a live TTY by default.

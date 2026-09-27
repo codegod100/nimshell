@@ -2,7 +2,7 @@
 ##
 ## Nushell-style process env lives under `$env` / `$env.VAR`.
 
-import std/[tables, strutils]
+import std/[os, tables, strutils]
 import sys, value
 
 type
@@ -15,6 +15,82 @@ proc newEnv*(): Env =
   let (ok, cwd) = getCwd()
   Env(cwd: if ok: cwd else: ".", lastExit: 0)
 
+proc isListEnvVar*(name: string): bool =
+  ## Env vars exposed as lists (split on `:`), like Nushell's `PATH`.
+  name == "PATH"
+
+proc expandTildePath(p: string): string =
+  if p == "~": getHomeDir().strip(leading = false, chars = {'/'})
+  elif p.startsWith("~/"): getHomeDir() / p[2 .. ^1]
+  else: p
+
+proc envFromString(name, s: string): Value =
+  ## OS string → shell value (`PATH` becomes a list of directories).
+  if isListEnvVar(name):
+    var items: seq[Value]
+    for part in s.split(':'):
+      if part != "": items.add strV(part)
+    listV(items)
+  else:
+    strV(s)
+
+proc envToString*(name: string, value: Value): string =
+  ## Shell value → OS string. Lists join with `:` for list env vars; a leading
+  ## `~` in each entry is expanded (`$env.PATH | append ~/bin`).
+  if isListEnvVar(name):
+    var parts: seq[string]
+    let items =
+      if value.kind == vkList: value.items
+      else: @[strV(asString(value))]
+    for it in items:
+      for part in asString(it).split(':'):
+        if part != "": parts.add expandTildePath(part)
+    parts.join(":")
+  else:
+    asString(value)
+
+# --- persisted user paths (like fish's `fish_add_path`) ---
+
+proc userPathsFile*(): string =
+  ## One directory per line; prepended to `PATH` at startup.
+  let cfg = getEnv("XDG_CONFIG_HOME")
+  let base = if cfg != "": cfg else: getHomeDir() / ".config"
+  base / "nimshell" / "paths"
+
+proc loadUserPaths*(): seq[string] =
+  try:
+    for line in readFile(userPathsFile()).splitLines:
+      let d = line.strip
+      if d != "" and not d.startsWith("#") and d notin result: result.add d
+  except IOError, OSError:
+    discard
+
+proc saveUserPaths*(dirs: seq[string]): (bool, string) =
+  let f = userPathsFile()
+  try:
+    createDir(f.parentDir)
+    writeFile(f, if dirs.len == 0: "" else: dirs.join("\n") & "\n")
+    (true, "")
+  except IOError, OSError:
+    (false, "cannot write " & f & ": " & getCurrentExceptionMsg())
+
+proc currentPathDirs*(): seq[string] =
+  for part in getEnv("PATH").split(':'):
+    if part != "": result.add part
+
+proc applyUserPaths*() =
+  ## Startup: put saved directories at the front of `PATH` (in file order),
+  ## dropping later duplicates so they take priority.
+  let user = loadUserPaths()
+  if user.len == 0: return
+  var dirs: seq[string]
+  for d in user:
+    let e = expandTildePath(d)
+    if e notin dirs: dirs.add e
+  for d in currentPathDirs():
+    if d notin dirs: dirs.add d
+  putEnv("PATH", dirs.join(":"))
+
 proc envRecord*(env: Env): Value =
   ## Process environment as a record (Nushell `$env`). `PWD` always reflects
   ## the shell cwd.
@@ -25,7 +101,7 @@ proc envRecord*(env: Env): Value =
       hasPwd = true
       pairs.add(("PWD", strV(env.cwd)))
     else:
-      pairs.add((k, strV(v)))
+      pairs.add((k, envFromString(k, v)))
   if not hasPwd: pairs.add(("PWD", strV(env.cwd)))
   recordV(pairs)
 
@@ -35,7 +111,7 @@ proc getOsEnv(env: Env, key: string): Value =
   of "PWD", "pwd": strV(env.cwd)
   else:
     let (ok, s) = getenvOpt(key)
-    if ok: strV(s) else: nothing()
+    if ok: envFromString(key, s) else: nothing()
 
 proc getVar*(env: Env, name: string): Value =
   case name
@@ -50,8 +126,8 @@ proc getVar*(env: Env, name: string): Value =
     elif env.vars.hasKey(name):
       env.vars[name]
     else:
-      let (ok, s) = getenvOpt(name)
-      if ok: strV(s) else: nothing()
+      # `$PATH`, `$HOME`, … fall back to the process environment.
+      getOsEnv(env, name)
 
 proc setVar*(env: Env, name: string, value: Value): Env =
   result = env
@@ -80,5 +156,5 @@ proc setOsEnv*(env: Env, name: string, value: Value): (bool, Env, string) =
   of "": (false, env, "empty environment variable name")
   of "PWD", "pwd": setCwd(env, asString(value))
   else:
-    setenv(name, asString(value))
+    setenv(name, envToString(name, value))
     (true, env, "")

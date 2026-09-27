@@ -120,6 +120,8 @@ suite "parser":
     check st.name == "FOO"
     check st.pipeline.commands[0].name == "__value__"
     check st.pipeline.commands[0].args == @[strArg("hello")]
+    let p = parseOk("$PATH = $PATH | append /x")
+    check p.kind == stEnvAssign and p.name == "PATH"
 
 suite "values":
   test "table from records":
@@ -174,7 +176,7 @@ suite "eval":
     let r = evalOk("$env")
     check r.kind == vkRecord
     check field(r, "HOME").kind == vkString
-    check field(r, "PATH").kind == vkString
+    check field(r, "PATH").kind == vkList
     check evalOk("$env | get HOME").s.len > 0
 
   test "env assign":
@@ -182,6 +184,56 @@ suite "eval":
     check v == strV("nimshell-test-val")
     check evalOk("$env.NIMSHELL_TEST_VAR", e2) == strV("nimshell-test-val")
     check getEnv("NIMSHELL_TEST_VAR") == "nimshell-test-val"
+
+  test "PATH is a list":
+    let saved = getEnv("PATH")
+    putEnv("PATH", "/usr/bin:/bin")
+    check evalOk("$env.PATH") == listV(@[strV("/usr/bin"), strV("/bin")])
+    check evalOk("$PATH") == evalOk("$env.PATH")
+    check evalOk("$env | get PATH | length") == intV(2)
+    let (_, v) = evalEnv("$env.PATH = $env.PATH | append ~/nimshell-bin")
+    check v.kind == vkList
+    check getEnv("PATH") == "/usr/bin:/bin:" & (getHomeDir() / "nimshell-bin")
+    discard evalEnv("$PATH = $PATH | prepend /opt/x")
+    check getEnv("PATH").startsWith("/opt/x:/usr/bin:")
+    discard evalEnv("$env.PATH = \"/a:/b\"")
+    check evalOk("$PATH") == listV(@[strV("/a"), strV("/b")])
+    let rows = evalOk("env | where name == PATH | get value")
+    check rows == listV(@[strV("/a:/b")])
+    putEnv("PATH", saved)
+
+  test "add-path / remove-path persist":
+    let savedPath = getEnv("PATH")
+    let savedCfg = getEnv("XDG_CONFIG_HOME")
+    let tmp = getTempDir() / "nimshell-addpath-test"
+    removeDir(tmp)
+    createDir(tmp / "bin")
+    createDir(tmp / "bin2")
+    putEnv("XDG_CONFIG_HOME", tmp / "cfg")
+    putEnv("PATH", "/usr/bin:/bin")
+    let v = evalOk("add_to_path " & (tmp / "bin"))
+    check v.kind == vkList and v.items[0] == strV(tmp / "bin")
+    check getEnv("PATH") == (tmp / "bin") & ":/usr/bin:/bin"
+    check loadUserPaths() == @[tmp / "bin"]
+    # already on PATH: no duplicate, stays saved once
+    discard evalOk("add-path " & (tmp / "bin"))
+    check getEnv("PATH") == (tmp / "bin") & ":/usr/bin:/bin"
+    check loadUserPaths() == @[tmp / "bin"]
+    # --no-save changes PATH only
+    discard evalOk("add-path --no-save " & (tmp / "bin2"))
+    check getEnv("PATH").startsWith((tmp / "bin2") & ":")
+    check loadUserPaths() == @[tmp / "bin"]
+    check evalOk("add-path " & (tmp / "missing")).kind == vkFail
+    # new session: saved dirs are prepended, duplicates dropped
+    putEnv("PATH", "/usr/bin:" & (tmp / "bin"))
+    applyUserPaths()
+    check getEnv("PATH") == (tmp / "bin") & ":/usr/bin"
+    discard evalOk("remove-path " & (tmp / "bin"))
+    check getEnv("PATH") == "/usr/bin"
+    check loadUserPaths().len == 0
+    putEnv("PATH", savedPath)
+    putEnv("XDG_CONFIG_HOME", savedCfg)
+    removeDir(tmp)
 
   test "where + select":
     let r = evalOk("echo [{name: a, n: 1} {name: b, n: 2} {name: c, n: 3}] | table | where n > 1 | select name")
