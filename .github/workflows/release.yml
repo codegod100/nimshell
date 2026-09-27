@@ -2,7 +2,8 @@ name: appimage
 
 # Every push to main that passes the tests builds the AppImage and publishes
 # it to the single rolling GitHub release under the `release` tag (the tag is
-# moved to the built commit and the assets are replaced), so installed
+# moved to the built commit and the release is recreated with the new
+# assets, so its date is the build's), so installed
 # AppImages pick it up on their next `self-update` / daily background check.
 # Version: <major>.<minor> from nimshell.nimble + the workflow run number as
 # patch (e.g. 0.2.14); it is published as the `VERSION` asset.
@@ -70,22 +71,20 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          # VERSION goes up last: clients only see the new version once the
-          # new AppImage is in place.
+          # `gh release create` uploads to a draft and publishes it once every
+          # asset is in place, so clients never see VERSION without its AppImage.
           echo "$VERSION" > "$RUNNER_TEMP/VERSION"
           # Move the rolling tag to this commit.
           git tag -f "$RELEASE_TAG" "$GITHUB_SHA"
           git push -f origin "refs/tags/$RELEASE_TAG"
           notes="nimshell $VERSION, built from $GITHUB_SHA."
-          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" dist/* --repo "$GITHUB_REPOSITORY" --clobber
-            gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/VERSION" --repo "$GITHUB_REPOSITORY" --clobber
-            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
-              --title "nimshell v$VERSION" --notes "$notes" --latest
-          else
-            gh release create "$RELEASE_TAG" dist/* "$RUNNER_TEMP/VERSION" --repo "$GITHUB_REPOSITORY" \
-              --verify-tag --title "nimshell v$VERSION" --notes "$notes" --latest
-          fi
+          # Recreate rather than edit: GitHub never changes a release's
+          # published date, so an edited release looks as old as the first
+          # build. The tag stays; `self-update` treats the few seconds without
+          # assets as "no release published yet" and tries again later.
+          gh release delete "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --yes 2>/dev/null || true
+          gh release create "$RELEASE_TAG" dist/* "$RUNNER_TEMP/VERSION" --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --title "nimshell v$VERSION" --notes "$notes" --latest
       - name: Remove versioned releases
         if: steps.version.outputs.publish == 'true'
         env:
