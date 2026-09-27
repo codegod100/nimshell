@@ -24,7 +24,13 @@ proc evalExpr(env: Env, e: Expr): (bool, Value, string) =
     # Unquoted `~` / `~/x` means home, like POSIX shells; `"~"` stays literal.
     if e.bare and e.lit.kind == vkString: (true, strV(expandHome(e.lit.s)), "")
     else: (true, e.lit, "")
-  of exVar: (true, getVar(env, e.name), "")
+  of exVar:
+    let v = getVar(env, e.name)
+    if e.suffix == "": (true, v, "")
+    elif v.kind == vkString: (true, strV(v.s & e.suffix), "")
+    elif v.kind == vkNothing: (false, nothing(), "$" & e.name & " is not set")
+    else: (false, nothing(), "$" & e.name & " is not a string; can't append `" &
+                             e.suffix & "`")
   of exList:
     var vals: seq[Value]
     for it in e.items:

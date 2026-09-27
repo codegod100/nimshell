@@ -185,6 +185,14 @@ suite "eval":
     check evalOk("echo $env.HOME") == strV(home)
     check evalOk("$env.HOME") == strV(home)
 
+  test "env var with path suffix":
+    let home = getEnv("HOME")
+    check evalOk("echo $HOME/nimshell/config.kdl") ==
+      strV(home & "/nimshell/config.kdl")
+    check evalOk("echo $env.HOME/x") == strV(home & "/x")
+    let f = evalOk("echo $NIMSHELL_SURELY_UNSET_VAR/x")
+    check f.kind == vkFail and "not set" in f.msg
+
   test "get dotted path":
     check evalOk("echo {user: {name: \"ada\"}} | get user.name") == strV("ada")
     check evalOk("echo {a: {b: {c: 42}}} | get a.b.c") == intV(42)
