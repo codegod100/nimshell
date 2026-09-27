@@ -4,7 +4,7 @@
 #   packaging/build-appimage.sh [version]
 #
 # Produces dist/nimshell-<arch>.AppImage and its .zsync. The update info
-# embedded in the image points at this repo's GitHub releases, so
+# embedded in the image points at this repo's `release` GitHub release, so
 # AppImageUpdate / appimageupdatetool can delta-update it; nimshell itself
 # updates via `self-update` (see src/nimshell/update.nim).
 #
@@ -52,7 +52,7 @@ fi
 OUT="dist/nimshell-${ARCH}.AppImage"
 # Runs without FUSE (CI containers): extract-and-run the tool itself.
 ( cd dist && ARCH="$ARCH" APPIMAGE_EXTRACT_AND_RUN=1 "../$TOOL" --no-appstream \
-    -u "gh-releases-zsync|${REPO%%/*}|${REPO##*/}|latest|nimshell-${ARCH}.AppImage.zsync" \
+    -u "gh-releases-zsync|${REPO%%/*}|${REPO##*/}|release|nimshell-${ARCH}.AppImage.zsync" \
     "../$APPDIR" "$(basename "$OUT")" )
 
 echo ">> smoke test"

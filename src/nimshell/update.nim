@@ -1,6 +1,8 @@
 ## Self-update for the AppImage build.
 ##
-## Releases are published on GitHub (see `.github/workflows/release.yml`).
+## Releases are published on GitHub (see `.github/workflows/release.yml`) as a
+## single rolling release under the `release` tag: its assets are replaced on
+## every publish, and a `VERSION` asset names the version they carry.
 ## When nimshell runs from an AppImage (`$APPIMAGE` is set) it can replace
 ## that file with the newest release:
 ##
@@ -10,7 +12,7 @@
 ##   turns that off)
 ##
 ## The download is verified before it replaces anything: it must be an ELF
-## AppImage and `new --version` must report the release tag. The swap is an
+## AppImage and `new --version` must report the published version. The swap is an
 ## atomic rename in the AppImage's own directory, so a running shell keeps
 ## its (old) file open and nothing is left half-written.
 
@@ -31,11 +33,15 @@ const
   UpdateRepo* {.strdefine.} = "codegod100/nimshell"
   UpdateHost* {.strdefine.} = "https://github.com"
     ## Only changed by the end-to-end test, which serves releases locally.
+  ReleaseTag* = "release"
+    ## The one release every build is published to.
+  VersionAsset* = "VERSION"
+    ## Release asset holding the published version (`0.2.14`).
   checkInterval = 24 * 60 * 60 # seconds between background checks
 
 type
   Release* = object
-    tag*: string
+    version*: string
     assetName*: string
     assetUrl*: string
 
@@ -78,11 +84,14 @@ proc assetName*(arch = archName()): string =
   ## embedded zsync update info matches (`nimshell-x86_64.AppImage`).
   "nimshell-" & arch & ".AppImage"
 
-proc tagFromLocation*(location: string): string =
-  ## `https://github.com/o/r/releases/tag/v1.2.3` → `v1.2.3` ("" otherwise).
-  let marker = "/releases/tag/"
-  let i = location.find(marker)
-  if i < 0: "" else: location[i + marker.len .. ^1].strip(chars = {'/'})
+proc versionFromAsset*(body: string): string =
+  ## Contents of the `VERSION` asset → `0.2.14` ("" unless it is a version).
+  let v = body.strip.strip(chars = {'v', 'V'}, trailing = false)
+  if v.len > 0 and v[0] in Digits and v.allCharsInSet(Digits + {'.', '-', '+'} + Letters): v
+  else: ""
+
+proc releaseUrl*(file: string): string =
+  UpdateHost & "/" & UpdateRepo & "/releases/download/" & ReleaseTag & "/" & file
 
 # --- state (last check, pending notice) ---
 
@@ -108,24 +117,23 @@ proc newClient(url: string, timeoutMs = 20_000, maxRedirects = 5): HttpClient =
   newShellClient(url, timeoutMs, headers, maxRedirects = maxRedirects)
 
 proc latestRelease*(): (bool, Release, string) =
-  ## Newest release tag from the `releases/latest` redirect (no GitHub API,
-  ## so no API rate limit). Returns (ok, release, error).
-  let url = UpdateHost & "/" & UpdateRepo & "/releases/latest"
-  let client = newClient(url, maxRedirects = 0)
+  ## Version published under the `release` tag, read from its `VERSION`
+  ## asset (a plain download, not the GitHub API, so no API rate limit).
+  ## Returns (ok, release, error).
+  let url = releaseUrl(VersionAsset)
+  let client = newClient(url)
   defer: client.close()
   try:
-    let resp = client.request(url, httpMethod = HttpHead)
-    let location = resp.headers.getOrDefault("location")
-    let tag = tagFromLocation(location)
-    if tag == "":
-      # With no releases GitHub redirects `latest` to the release list.
-      if resp.code == Http404 or location.strip(chars = {'/'}).endsWith("/releases"):
-        return (false, Release(), "no releases published yet")
+    let resp = client.request(url, httpMethod = HttpGet)
+    if resp.code == Http404:
+      return (false, Release(), "no release published yet")
+    if not resp.code.is2xx:
       return (false, Release(), "unexpected response from GitHub: " & $resp.code)
+    let version = versionFromAsset(resp.body)
+    if version == "":
+      return (false, Release(), "release has no valid " & VersionAsset & " file")
     let name = assetName()
-    (true, Release(tag: tag, assetName: name,
-                   assetUrl: UpdateHost & "/" & UpdateRepo &
-                     "/releases/download/" & tag & "/" & name), "")
+    (true, Release(version: version, assetName: name, assetUrl: releaseUrl(name)), "")
   except CatchableError as e:
     (false, Release(), e.msg)
 
@@ -143,11 +151,11 @@ proc looksLikeAppImage*(path: string): bool =
   except CatchableError:
     false
 
-proc reportsVersion(path, tag: string): bool =
-  ## Run the downloaded AppImage once to prove it starts and is `tag`.
+proc reportsVersion(path, version: string): bool =
+  ## Run the downloaded AppImage once to prove it starts and is `version`.
   try:
     let (outp, code) = execCmdEx(quoteShell(path) & " --version")
-    code == 0 and outp.strip == "nimshell " & tag.strip(chars = {'v', 'V'}, trailing = false)
+    code == 0 and outp.strip == "nimshell " & version
   except CatchableError:
     false
 
@@ -169,7 +177,7 @@ proc install(release: Release, target: string): UpdateResult =
                              fpGroupExec, fpOthersRead, fpOthersExec})
   except OSError as e:
     return UpdateResult(message: "chmod failed: " & e.msg)
-  if not reportsVersion(tmp, release.tag):
+  if not reportsVersion(tmp, release.version):
     return UpdateResult(message: "downloaded AppImage did not start or reported the wrong version")
   # Atomic swap: the running process keeps the old inode.
   # (same directory → rename(2), which replaces `target` atomically)
@@ -178,7 +186,7 @@ proc install(release: Release, target: string): UpdateResult =
   except OSError as e:
     return UpdateResult(message: "cannot replace " & target & ": " & e.msg)
   UpdateResult(ok: true, updated: true,
-               message: "updated nimshell " & NimshellVersion & " → " & release.tag)
+               message: "updated nimshell " & NimshellVersion & " → " & release.version)
 
 proc appImagePath*(): string =
   ## Path of the running AppImage, or "" when not running from one.
@@ -191,21 +199,21 @@ proc selfUpdate*(checkOnly = false): UpdateResult =
   state["last_check"] = %getTime().toUnix
   saveState(state)
   if not ok: return UpdateResult(message: "update check failed: " & err)
-  if not isNewer(release.tag, NimshellVersion):
+  if not isNewer(release.version, NimshellVersion):
     return UpdateResult(ok: true, message: "nimshell " & NimshellVersion & " is up to date")
   if checkOnly:
     return UpdateResult(ok: true, message: "update available: " & NimshellVersion &
-                        " → " & release.tag & " (run `self-update`)")
+                        " → " & release.version & " (run `self-update`)")
   if target == "":
-    return UpdateResult(message: "update available (" & release.tag &
+    return UpdateResult(message: "update available (" & release.version &
       "), but nimshell is not running from an AppImage; download it from " &
-      "https://github.com/" & UpdateRepo & "/releases/latest")
+      "https://github.com/" & UpdateRepo & "/releases/tag/" & ReleaseTag)
   if not fileExists(target) or access(target.parentDir.cstring, W_OK) != 0:
     return UpdateResult(message: "cannot write to " & target.parentDir)
   result = install(release, target)
   if result.updated:
     state = loadState()
-    state["notice"] = %("nimshell updated " & NimshellVersion & " → " & release.tag)
+    state["notice"] = %("nimshell updated " & NimshellVersion & " → " & release.version)
     saveState(state)
 
 # --- background checks from the REPL ---
