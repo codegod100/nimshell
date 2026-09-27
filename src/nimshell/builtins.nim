@@ -177,6 +177,9 @@ proc helpText(): Table[string, string] =
     "describe": "describe — record with type, length, and string form of input",
     "env": "env [NAME] — process environment table, or one var (same as `$env` / `$env.NAME`)",
     "which": "which [-a|--all] [-f|--follow] <name> — path of command (builtin or on PATH); -a all matches, -f follow symlinks",
+    "add-path": "add-path [-n|--no-save] <dir>… — prepend dirs to PATH and remember them for new sessions (like fish_add_path)",
+    "add_to_path": "add_to_path — alias for add-path",
+    "remove-path": "remove-path <dir>… — remove dirs from PATH and from the saved add-path list",
     "exit": "exit [code] — leave the shell (default code 0)",
     "quit": "quit [code] — alias for exit",
     "ignore": "ignore — discard pipeline input; emit nothing",
@@ -1095,6 +1098,64 @@ proc whichMaybeFollow(follow: bool, path: string): string =
   let (success, resolved) = realpath(path)
   if success: resolved else: path
 
+proc pathDirArg(env: Env, v: Value): string =
+  ## `~/bin`, `./bin`, `bin` → absolute directory path.
+  let raw = asString(v)
+  let (hasHome, home) = homeDir()
+  let p =
+    if raw == "~" and hasHome: home
+    elif raw.startsWith("~/") and hasHome: home / raw[2 .. ^1]
+    else: raw
+  normalizedPath(if p.isAbsolute: p else: env.cwd / p)
+
+proc pathResult(env: Env): BuiltinResult =
+  ok(setExit(env, 0), getVar(env, "env.PATH"))
+
+proc cmdAddPath(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinResult =
+  ## Like fish's `fish_add_path`: prepend dirs to `PATH` (skipping ones already
+  ## there) and remember them in `userPathsFile()` for future sessions.
+  let (noSave, stolen) = findBoolFlag(flags, ["n", "no-save"])
+  let dirsIn = args & stolen
+  if dirsIn.len == 0:
+    return err(env, "add-path: expected directory (try `add-path [--no-save] <dir>…`)")
+  var dirs: seq[string]
+  for v in dirsIn:
+    let d = pathDirArg(env, v)
+    if not dirExists(d): return err(env, "add-path: not a directory: " & d)
+    if d notin dirs: dirs.add d
+  var path = currentPathDirs()
+  var fresh: seq[string]
+  for d in dirs:
+    if d notin path: fresh.add d
+  if fresh.len > 0: setenv("PATH", (fresh & path).join(":"))
+  if not noSave:
+    var saved = loadUserPaths()
+    for d in dirs:
+      if d notin saved: saved.add d
+    let (okSave, msg) = saveUserPaths(saved)
+    if not okSave: return err(env, "add-path: " & msg)
+  pathResult(env)
+
+proc cmdRemovePath(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinResult =
+  ## Undo `add-path`: drop dirs from `PATH` and from the saved list.
+  if args.len == 0:
+    return err(env, "remove-path: expected directory (try `remove-path <dir>…`)")
+  var dirs: seq[string]
+  for v in args: dirs.add pathDirArg(env, v)
+  var path: seq[string]
+  for d in currentPathDirs():
+    if d notin dirs: path.add d
+  setenv("PATH", path.join(":"))
+  var saved: seq[string]
+  var changed = false
+  for d in loadUserPaths():
+    if d in dirs or pathDirArg(env, strV(d)) in dirs: changed = true
+    else: saved.add d
+  if changed:
+    let (okSave, msg) = saveUserPaths(saved)
+    if not okSave: return err(env, "remove-path: " & msg)
+  pathResult(env)
+
 proc cmdWhich(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinResult =
   # Boolean flags may steal the next word (`which -a name` → flag a = "name").
   let (all, stolenA) = findBoolFlag(flags, ["a", "all"])
@@ -1392,6 +1453,9 @@ let registryTable = {
   "describe": cmdDescribe,
   "env": cmdEnv,
   "which": cmdWhich,
+  "add-path": cmdAddPath,
+  "add_to_path": cmdAddPath,
+  "remove-path": cmdRemovePath,
   "exit": cmdExit,
   "quit": cmdExit,
   "ignore": cmdIgnore,

@@ -40,6 +40,7 @@ proc printValue(v: Value, allowPage: bool) =
 # --- modes ---
 
 proc runOnce(code: string) =
+  applyUserPaths()
   let r = evalSource(newEnv(), code)
   case r.kind
   of erQuit: quit(r.code)
@@ -57,6 +58,7 @@ proc repl() =
   let notice = takeNotice()
   if notice != "": println("✨ " & notice)
   maybeBackgroundUpdate()
+  applyUserPaths()
   var env = newEnv()
   var lastDurationMs = 0'i64
   pushTitle()

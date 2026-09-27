@@ -164,6 +164,9 @@ $env.HOME
 $env.PATH                     # a list of directories (joined with `:` for externals)
 $env.PATH = $env.PATH | append ~/.local/bin
 $PATH = $PATH | prepend ~/bin # `$PATH` is shorthand for `$env.PATH`
+add-path ~/.local/bin         # like fish_add_path: prepend + remember for new sessions
+add-path --no-save ./bin      # this session only
+remove-path ~/.local/bin      # undo (also forgets it)
 $env.MY_VAR = hello
 echo $env.MY_VAR
 
@@ -214,7 +217,7 @@ Table/list: `where`/`filter`, `find`, `select`, `get`, `first`, `last`, `take`,
 
 Data: `echo`, `range`, `lines`, `input` (multi-line paste / stdin until Ctrl+D),
 `to`/`from` (subcommands `json`, `jwt`), `type`, `describe`, `env`, `sys`, `ps`,
-`whyport`, `now`, `which`, `help`, `about`, `exit`
+`whyport`, `now`, `which`, `add-path` (alias `add_to_path`), `remove-path`, `help`, `about`, `exit`
 
 HTTP: `http get|post|put|delete|patch|head` — fetch/send with structured JSON
 bodies and responses (`http get https://example.com`, `http post URL {a: 1}`,
@@ -239,6 +242,9 @@ pagers forced to `cat` (plus `FORCE_COLOR` / `CLICOLOR_FORCE` and a git
 **same builtin pager** when the text does not fit on one screen.
 
 Unknown command names fall through to external executables on `PATH`.
+Directories saved with `add-path` live in `$XDG_CONFIG_HOME/nimshell/paths`
+(default `~/.config/nimshell/paths`, one per line) and are prepended to `PATH`
+when nimshell starts.
 
 ## Layout
 

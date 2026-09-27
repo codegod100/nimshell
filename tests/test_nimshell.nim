@@ -202,6 +202,39 @@ suite "eval":
     check rows == listV(@[strV("/a:/b")])
     putEnv("PATH", saved)
 
+  test "add-path / remove-path persist":
+    let savedPath = getEnv("PATH")
+    let savedCfg = getEnv("XDG_CONFIG_HOME")
+    let tmp = getTempDir() / "nimshell-addpath-test"
+    removeDir(tmp)
+    createDir(tmp / "bin")
+    createDir(tmp / "bin2")
+    putEnv("XDG_CONFIG_HOME", tmp / "cfg")
+    putEnv("PATH", "/usr/bin:/bin")
+    let v = evalOk("add_to_path " & (tmp / "bin"))
+    check v.kind == vkList and v.items[0] == strV(tmp / "bin")
+    check getEnv("PATH") == (tmp / "bin") & ":/usr/bin:/bin"
+    check loadUserPaths() == @[tmp / "bin"]
+    # already on PATH: no duplicate, stays saved once
+    discard evalOk("add-path " & (tmp / "bin"))
+    check getEnv("PATH") == (tmp / "bin") & ":/usr/bin:/bin"
+    check loadUserPaths() == @[tmp / "bin"]
+    # --no-save changes PATH only
+    discard evalOk("add-path --no-save " & (tmp / "bin2"))
+    check getEnv("PATH").startsWith((tmp / "bin2") & ":")
+    check loadUserPaths() == @[tmp / "bin"]
+    check evalOk("add-path " & (tmp / "missing")).kind == vkFail
+    # new session: saved dirs are prepended, duplicates dropped
+    putEnv("PATH", "/usr/bin:" & (tmp / "bin"))
+    applyUserPaths()
+    check getEnv("PATH") == (tmp / "bin") & ":/usr/bin"
+    discard evalOk("remove-path " & (tmp / "bin"))
+    check getEnv("PATH") == "/usr/bin"
+    check loadUserPaths().len == 0
+    putEnv("PATH", savedPath)
+    putEnv("XDG_CONFIG_HOME", savedCfg)
+    removeDir(tmp)
+
   test "where + select":
     let r = evalOk("echo [{name: a, n: 1} {name: b, n: 2} {name: c, n: 3}] | table | where n > 1 | select name")
     check r == tableV(@["name"], @[@[strV("b")], @[strV("c")]])
