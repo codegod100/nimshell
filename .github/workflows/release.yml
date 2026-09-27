@@ -7,6 +7,8 @@ name: appimage
 #
 # Pushing a `v*` tag publishes that exact version instead (manual override).
 # Pull requests build the AppImage as a workflow artifact without publishing.
+# After publishing, only the newest KEEP_RELEASES releases (and their tags)
+# are kept.
 on:
   push:
     branches: [main, master]
@@ -19,6 +21,9 @@ on:
 
 permissions:
   contents: write
+
+env:
+  KEEP_RELEASES: 5
 
 # One release build at a time, in push order.
 concurrency:
@@ -73,3 +78,18 @@ jobs:
           files: dist/*
           generate_release_notes: true
           make_latest: true
+      - name: Prune old releases
+        if: steps.version.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Newest first by creation time; everything past KEEP_RELEASES goes,
+          # together with its git tag. The release just published is newest.
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 1000 \
+              --json tagName,createdAt \
+              --jq "sort_by(.createdAt) | reverse | .[${KEEP_RELEASES}:] | .[].tagName" |
+          while read -r tag; do
+            [ -n "$tag" ] || continue
+            echo "Deleting release $tag"
+            gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+          done

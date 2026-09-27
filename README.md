@@ -97,6 +97,8 @@ git tag v1.0.0 && git push origin v1.0.0
 ```
 
 Pull requests build the AppImage as a workflow artifact without publishing.
+Only the 5 newest releases are kept; older releases and their tags are deleted
+after each publish (`KEEP_RELEASES` in the workflow).
 
 ### REPL editing
 
