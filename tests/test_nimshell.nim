@@ -1,7 +1,7 @@
 ## Test suite — ported from gleshell's gleeunit tests.
 
 import std/[options, os, strutils, unittest]
-import ../src/nimshell/[builtins, color, display, env, eval, highlight, lexer,
+import ../src/nimshell/[builtins, color, config, kdl, display, env, eval, highlight, lexer,
                         lineedit, netclient, pager, parser, prompt, syntax, sys,
                         update, value]
 
@@ -672,3 +672,83 @@ suite "self-update":
     for (n, v) in [("HTTPS_PROXY", saved[0]), ("https_proxy", saved[1]), ("NO_PROXY", saved[2]),
                    ("no_proxy", saved[3]), ("ALL_PROXY", saved[4]), ("all_proxy", saved[5])]:
       if v == "": delEnv(n) else: putEnv(n, v)
+
+suite "kdl":
+  test "nodes, args, props, children":
+    let doc = parseKdl("""
+      // comment
+      title "hello world" count=3
+      bare foo #true null /* inline */ 0x1F 1_000.5
+      parent {
+        child "a"; child r"raw\n" #"also raw"#
+      }
+      /-skipped "gone"
+      kept /-"gone" "stays" \
+        "continued"
+      "quoted name" (u8)7
+    """)
+    check doc.len == 5
+    check doc[0].name == "title"
+    check $doc[0].args[0] == "hello world"
+    check doc[0].props[0][0] == "count" and doc[0].props[0][1].num == 3
+    check doc[1].args.len == 5
+    check doc[1].args[0].kind == kkString and doc[1].args[1].b
+    check doc[1].args[2].kind == kkNull
+    check doc[1].args[3].num == 31 and doc[1].args[4].num == 1000.5
+    check doc[2].children.len == 2
+    check doc[2].children[1].args[0].str == "raw\\n"
+    check doc[2].children[1].args[1].str == "also raw"
+    check doc[3].name == "kept"
+    check doc[3].args.len == 2 and $doc[3].args[1] == "continued"
+    check doc[4].name == "quoted name" and doc[4].args[0].num == 7
+  test "escapes":
+    check parseKdl("n \"a\\tb\\u{1F600}\\\"\"")[0].args[0].str == "a\tb😀\""
+  test "errors carry line numbers":
+    expect KdlError: discard parseKdl("a {\n b")
+    try:
+      discard parseKdl("ok\nbad \"unterminated")
+      check false
+    except KdlError as e:
+      check e.msg.startsWith("line 2")
+
+suite "config":
+  test "path and env":
+    let saved = getEnv("PATH")
+    putEnv("PATH", "/usr/bin:/bin:/opt/x")
+    putEnv("NIMSHELL_CFG_BASE", "/base")
+    let warnings = applyConfig("""
+      env {
+        NIMSHELL_CFG_A "hello"
+        NIMSHELL_CFG_B "${NIMSHELL_CFG_BASE}/sub"
+        NIMSHELL_CFG_N 42
+        NIMSHELL_CFG_BASE null
+      }
+      path "/first" "$NIMSHELL_CFG_A/bin"
+      path {
+        prepend "/opt/x"
+        append "/last" "/bin"
+      }
+    """)
+    check warnings.len == 0
+    check getEnv("NIMSHELL_CFG_A") == "hello"
+    check getEnv("NIMSHELL_CFG_B") == "/base/sub"
+    check getEnv("NIMSHELL_CFG_N") == "42"
+    check not existsEnv("NIMSHELL_CFG_BASE")
+    check getEnv("PATH") == "/opt/x:/first:hello/bin:/usr/bin:/last:/bin"
+    putEnv("PATH", saved)
+    for n in ["NIMSHELL_CFG_A", "NIMSHELL_CFG_B", "NIMSHELL_CFG_N"]: delEnv(n)
+  test "tilde expansion":
+    check expandValue("~/bin") == getHomeDir().strip(leading = false, chars = {'/'}) & "/bin"
+    check expandValue("a~b") == "a~b"
+  test "warnings":
+    let saved = getEnv("PATH")
+    check applyConfig("nope 1").len == 1
+    check applyConfig("path { middle \"/x\" }").len == 1
+    check applyConfig("env { PATH \"/x\" }").len == 1
+    check applyConfig("oops {")[0].startsWith("line ")
+    check getEnv("PATH") == saved
+  test "config file location":
+    let saved = getEnv("XDG_CONFIG_HOME")
+    putEnv("XDG_CONFIG_HOME", "/cfg")
+    check configFile() == "/cfg/nimshell/config.kdl"
+    if saved == "": delEnv("XDG_CONFIG_HOME") else: putEnv("XDG_CONFIG_HOME", saved)
