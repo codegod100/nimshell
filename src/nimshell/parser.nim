@@ -11,7 +11,9 @@ type
 
   Expr* = object
     case kind*: ExprKind
-    of exLit: lit*: Value
+    of exLit:
+      lit*: Value
+      bare*: bool ## unquoted word: a leading `~` expands to home at eval
     of exVar: name*: string
     of exList: items*: seq[Expr]
     of exRecord: fields*: seq[(string, Expr)]
@@ -31,6 +33,7 @@ type
 
   Command* = object
     name*: string
+    bareName*: bool ## unquoted name: a leading `~` expands to home at eval
     args*: seq[Arg]
     external*: bool
 
@@ -47,7 +50,7 @@ type
     name*: string
     pipeline*: Pipeline
 
-proc lit*(v: Value): Expr = Expr(kind: exLit, lit: v)
+proc lit*(v: Value, bare = false): Expr = Expr(kind: exLit, lit: v, bare: bare)
 proc valueArg*(e: Expr): Arg = Arg(kind: argValue, expr: e)
 proc flagArg*(name: string, short = false): Arg =
   Arg(kind: argFlag, flagName: name, flagShort: short)
@@ -152,7 +155,7 @@ proc parseExpr(c: var Cursor): Expr =
     Expr(kind: exVar, name: n.text)
   of tkLBracket: inc c.pos; parseList(c)
   of tkLBrace: inc c.pos; parseRecord(c)
-  of tkIdent: inc c.pos; lit(strV(t.text))
+  of tkIdent: inc c.pos; lit(strV(t.text), bare = true)
   else: fail("expected expression")
 
 proc parseColonAtom(c: var Cursor, piece: var string): bool =
@@ -180,9 +183,9 @@ proc glueColonSuffix(e: Expr, c: var Cursor): Expr =
     inc c.pos
     var piece: string
     if parseColonAtom(c, piece):
-      result = lit(strV(head & ":" & piece))
+      result = lit(strV(head & ":" & piece), e.bare)
     else:
-      return lit(strV(head & ":"))
+      return lit(strV(head & ":"), e.bare)
 
 proc parseArgs(c: var Cursor): seq[Arg] =
   while true:
@@ -227,10 +230,11 @@ proc parseCommand(c: var Cursor): Command =
     let n = c.peek(1)
     if n.kind != tkIdent: fail("expected command name")
     c.pos += 2
-    Command(name: n.text, args: parseArgs(c), external: true)
+    Command(name: n.text, bareName: true, args: parseArgs(c), external: true)
   of tkIdent, tkStringLit:
     inc c.pos
-    Command(name: t.text, args: parseArgs(c), external: false)
+    Command(name: t.text, bareName: t.kind == tkIdent, args: parseArgs(c),
+            external: false)
   # Bare value as pipeline stage: `$env`, `$x`, `[1 2]`, `{a: 1}`, …
   # Becomes internal `__value__` that yields the expression.
   of tkDollar, tkLBracket, tkLBrace, tkIntLit, tkFloatLit, tkBoolLit,
