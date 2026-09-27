@@ -14,7 +14,9 @@ type
     of exLit:
       lit*: Value
       bare*: bool ## unquoted word: a leading `~` expands to home at eval
-    of exVar: name*: string
+    of exVar:
+      name*: string
+      suffix*: string ## path tail glued on at eval: `$HOME/x` → name HOME, suffix `/x`
     of exList: items*: seq[Expr]
     of exRecord: fields*: seq[(string, Expr)]
 
@@ -43,12 +45,14 @@ type
   StatementKind* = enum
     stLet,       ## `let name = pipeline`
     stEnvAssign, ## `$env.NAME = pipeline` — set a process environment variable
+    stExport,    ## `export NAME = pipeline` — set and save to config.kdl
     stExpr       ## Bare pipeline expression
 
   Statement* = object
     kind*: StatementKind
     name*: string
-    pipeline*: Pipeline
+    pipeline*: Pipeline ## empty for `export NAME` (keep the current value)
+    noSave*: bool       ## `export --no-save`: this session only
 
 proc lit*(v: Value, bare = false): Expr = Expr(kind: exLit, lit: v, bare: bare)
 proc valueArg*(e: Expr): Arg = Arg(kind: argValue, expr: e)
@@ -63,7 +67,7 @@ proc `==`*(a, b: Expr): bool {.noSideEffect.} =
   if a.kind != b.kind: return false
   case a.kind
   of exLit: a.lit == b.lit
-  of exVar: a.name == b.name
+  of exVar: a.name == b.name and a.suffix == b.suffix
   of exList: a.items == b.items
   of exRecord: a.fields == b.fields
 
@@ -152,7 +156,14 @@ proc parseExpr(c: var Cursor): Expr =
     let n = c.peek(1)
     if n.kind != tkIdent: fail("expected variable name after $")
     c.pos += 2
-    Expr(kind: exVar, name: n.text)
+    # `/` is a word char for paths, so `$HOME/x` lexes as one ident; the
+    # variable name stops at the first `/` and the rest is a path suffix.
+    let slash = n.text.find('/')
+    if slash == 0: fail("expected variable name after $")
+    if slash > 0:
+      Expr(kind: exVar, name: n.text[0 ..< slash], suffix: n.text[slash .. ^1])
+    else:
+      Expr(kind: exVar, name: n.text)
   of tkLBracket: inc c.pos; parseList(c)
   of tkLBrace: inc c.pos; parseRecord(c)
   of tkIdent: inc c.pos; lit(strV(t.text), bare = true)
@@ -265,8 +276,34 @@ proc parseAssignRhs(c: var Cursor): Pipeline =
     c.pos = save
   parsePipeline(c)
 
+proc isEnvName*(s: string): bool =
+  ## Portable environment variable name: `[A-Za-z_][A-Za-z0-9_]*`.
+  s.len > 0 and s[0] in IdentStartChars and s.allCharsInSet(IdentChars)
+
+proc parseExport(c: var Cursor): Statement =
+  ## `export [-n|--no-save] NAME [= value…]` (`NAME=value` lexes the same).
+  const usage = "usage: export [--no-save] NAME = value"
+  inc c.pos
+  result = Statement(kind: stExport)
+  while c.peek.kind == tkFlag:
+    let f = c.peek.text
+    if f notin ["n", "no-save"]: fail("export: unknown flag `" & f & "` (" & usage & ")")
+    result.noSave = true
+    inc c.pos
+  let t = c.peek
+  if t.kind notin {tkIdent, tkStringLit}: fail("export: expected a variable name (" & usage & ")")
+  if not isEnvName(t.text): fail("export: invalid variable name `" & t.text & "`")
+  result.name = t.text
+  inc c.pos
+  if c.atEnd: return
+  if c.peek.kind != tkAssign: fail("export: expected `=` after " & t.text & " (" & usage & ")")
+  inc c.pos
+  if c.atEnd: fail("export: expected a value after `=`")
+  result.pipeline = parseAssignRhs(c)
+
 proc parseStatement(c: var Cursor): Statement =
   let t0 = c.peek
+  if t0.kind == tkIdent and t0.text == "export": return parseExport(c)
   let t1 = c.peek(1)
   let t2 = c.peek(2)
   if t0.kind == tkIdent and t0.text == "let" and t1.kind == tkIdent and

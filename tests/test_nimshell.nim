@@ -185,6 +185,14 @@ suite "eval":
     check evalOk("echo $env.HOME") == strV(home)
     check evalOk("$env.HOME") == strV(home)
 
+  test "env var with path suffix":
+    let home = getEnv("HOME")
+    check evalOk("echo $HOME/nimshell/config.kdl") ==
+      strV(home & "/nimshell/config.kdl")
+    check evalOk("echo $env.HOME/x") == strV(home & "/x")
+    let f = evalOk("echo $NIMSHELL_SURELY_UNSET_VAR/x")
+    check f.kind == vkFail and "not set" in f.msg
+
   test "get dotted path":
     check evalOk("echo {user: {name: \"ada\"}} | get user.name") == strV("ada")
     check evalOk("echo {a: {b: {c: 42}}} | get a.b.c") == intV(42)
@@ -258,6 +266,42 @@ suite "eval":
     check not fileExists(tmp / "cfg" / "nimshell" / "paths")
     check configPathDirs() == @[tmp / "bin2"]
     putEnv("PATH", savedPath)
+    putEnv("XDG_CONFIG_HOME", savedCfg)
+    removeDir(tmp)
+
+  test "export sets $env and saves to config.kdl":
+    let savedCfg = getEnv("XDG_CONFIG_HOME")
+    let tmp = getTempDir() / "nimshell-export-test"
+    removeDir(tmp)
+    createDir(tmp / "nimshell")
+    putEnv("XDG_CONFIG_HOME", tmp)
+    let cfg = configFile()
+    writeFile(cfg, "// keep me\nenv {\n    NS_A \"1\" // note\n}\npath \"/opt/x\"\n")
+    check evalOk("export NS_A=2") == strV("2")
+    check getEnv("NS_A") == "2"
+    check evalOk("export NS_B = \"$5 each\"") == strV("$5 each")
+    discard evalOk("export NS_C = ~/go")
+    check getEnv("NS_C") == getHomeDir() / "go"
+    check readFile(cfg) == "// keep me\nenv {\n    NS_A \"2\" // note\n" &
+      "    NS_B \"$$5 each\"\n    NS_C \"~/go\"\n}\npath \"/opt/x\"\n"
+    # --no-save only sets the variable; bare `export NAME` saves its value
+    discard evalOk("export --no-save NS_D=x")
+    check getEnv("NS_D") == "x"
+    check "NS_D" notin readFile(cfg)
+    discard evalOk("export NS_D")
+    check "NS_D \"x\"" in readFile(cfg)
+    # the saved file loads back to the same values
+    delEnv("NS_B")
+    check loadConfig().len == 0
+    check getEnv("NS_B") == "$5 each"
+    check evalOk("export NS_UNSET_VAR").kind == vkFail
+    check evalOk("export PATH=/x").kind == vkFail
+    check evalOk("export 1BAD=x").kind == vkFail
+    # a new block is created when there is none
+    writeFile(cfg, "path \"/opt/x\"")
+    discard evalOk("export NS_A=3")
+    check readFile(cfg) == "path \"/opt/x\"\nenv {\n    NS_A \"3\"\n}\n"
+    for v in ["NS_A", "NS_B", "NS_C", "NS_D"]: delEnv(v)
     putEnv("XDG_CONFIG_HOME", savedCfg)
     removeDir(tmp)
 
@@ -736,6 +780,8 @@ suite "self-update":
       check not autoUpdateEnabled()
     let v = evalOk("version")
     check field(v, "version") == strV(NimshellVersion)
+    check NimshellCommit.len == 40
+    check field(v, "commit") == strV(NimshellCommit)
     check evalOk("which self-update") == strV("builtin: self-update")
     check "--check" in evalOk("help self-update").s
   test "proxy from environment":

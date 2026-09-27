@@ -1,7 +1,7 @@
 ## Evaluate pipelines against the environment.
 
 import std/[strutils, tables]
-import alias, builtins, env, parser, sys, value
+import alias, builtins, config, env, parser, sys, value
 
 type
   EvalResultKind* = enum
@@ -24,7 +24,13 @@ proc evalExpr(env: Env, e: Expr): (bool, Value, string) =
     # Unquoted `~` / `~/x` means home, like POSIX shells; `"~"` stays literal.
     if e.bare and e.lit.kind == vkString: (true, strV(expandHome(e.lit.s)), "")
     else: (true, e.lit, "")
-  of exVar: (true, getVar(env, e.name), "")
+  of exVar:
+    let v = getVar(env, e.name)
+    if e.suffix == "": (true, v, "")
+    elif v.kind == vkString: (true, strV(v.s & e.suffix), "")
+    elif v.kind == vkNothing: (false, nothing(), "$" & e.name & " is not set")
+    else: (false, nothing(), "$" & e.name & " is not a string; can't append `" &
+                             e.suffix & "`")
   of exList:
     var vals: seq[Value]
     for it in e.items:
@@ -162,6 +168,26 @@ proc evalStatement(env: Env, stmt: Statement): EvalResult =
     # Echo what was stored (`~` expanded, `PATH` re-split into a list).
     if ok: cont(setExit(env3, 0), getVar(env3, "env." & stmt.name))
     else: cont(setExit(r.env, 1), failV(msg))
+  of stExport:
+    # `export NAME = …`: like `$env.NAME = …`, then saved to config.kdl.
+    # Bare `export NAME` saves the variable's current value.
+    if stmt.name == "PATH" and not stmt.noSave:
+      return cont(setExit(env, 1), failV("export: save PATH entries with `add-path`, " &
+                                         "or use `export --no-save PATH = …`"))
+    var env2 = env
+    if stmt.pipeline.commands.len > 0:
+      let r = evalPipeline(env, stmt.pipeline, nothing(), false)
+      if r.kind == erQuit or r.value.kind == vkFail: return r
+      let (ok, env3, msg) = setOsEnv(r.env, stmt.name, r.value)
+      if not ok: return cont(setExit(r.env, 1), failV("export: " & msg))
+      env2 = env3
+    let value = getVar(env2, "env." & stmt.name)
+    if value.kind == vkNothing:
+      return cont(setExit(env2, 1), failV("export: " & stmt.name & " is not set"))
+    if not stmt.noSave:
+      let msg = saveConfigEnv(stmt.name, envToString(stmt.name, value))
+      if msg != "": return cont(setExit(env2, 1), failV("export: " & msg))
+    cont(setExit(env2, 0), value)
   of stExpr:
     # Bare expression: last stage gets a live TTY by default.
     evalPipeline(env, stmt.pipeline, nothing(), true)
