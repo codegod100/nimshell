@@ -38,14 +38,13 @@ proc printValue(v: Value, allowPage: bool) =
   else: println(text)
 
 proc applyUserConfig() =
-  ## Apply `config.kdl` (PATH, env). Problems are reported, never fatal.
+  ## Apply `config.kdl` (PATH, env, prompt). Problems are reported, never fatal.
   for w in loadConfig(): printlnErr("nimshell: config: " & w)
 
 # --- modes ---
 
 proc runOnce(code: string) =
   applyUserConfig()
-  applyUserPaths()
   let r = evalSource(newEnv(), code)
   case r.kind
   of erQuit: quit(r.code)
@@ -64,7 +63,6 @@ proc repl() =
   let notice = takeNotice()
   if notice != "": println("✨ " & notice)
   maybeBackgroundUpdate()
-  applyUserPaths()
   var env = newEnv()
   var lastDurationMs = 0'i64
   pushTitle()

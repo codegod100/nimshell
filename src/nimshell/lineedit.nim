@@ -3,7 +3,7 @@
 
 import std/[algorithm, os, sets, strutils]
 from std/unicode import toLower, runes, `$`
-import builtins, color, highlight, sys
+import alias, builtins, color, highlight, sys
 
 const
   historyMax = 2000
@@ -131,7 +131,7 @@ proc isExecutable(path: string): bool =
 
 proc commandCompletions(word: string): seq[string] =
   var found: HashSet[string]
-  for n in names():
+  for n in names() & aliasNames():
     if n.startsWith(word): found.incl n
   if "let".startsWith(word): found.incl "let"
   # Empty prefix: skip PATH dump (can be thousands of names).

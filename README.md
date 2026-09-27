@@ -18,7 +18,8 @@ values: strings, numbers, lists, records, and tables. Built-in commands like
 ╰──────┴──────╯
 ```
 
-The interactive prompt is zero-config and Starship-inspired:
+The interactive prompt is Starship-inspired and works with zero config (it can
+be customized in [`config.kdl`](#config)):
 
 - full path with `~`
 - git branch (read from `.git`) plus status from `git status`:
@@ -32,7 +33,8 @@ exit). Set `NIMSHELL_NO_TITLE=1` to leave the title alone.
 
 It uses plain Unicode, so it renders in any terminal. With a
 [Nerd Font](https://www.nerdfonts.com) installed, set `NIMSHELL_NERD_FONT=1` for a
-branch icon and the `` terminal prompt character.
+branch icon and the `` terminal prompt character (or `nerd-font #true` in
+the config).
 
 ## Quick start
 
@@ -149,8 +151,58 @@ path {
   already on `PATH` moves instead of being duplicated.
 - Values expand a leading `~` and `$VAR` / `${VAR}`. Nodes apply in file
   order, so `path` can use variables set by an earlier `env`.
+- `add-path <dir>` appends a `path "<dir>"` line (home written as `~`) unless
+  the directory is already listed; `remove-path <dir>` deletes it from
+  whichever `path` entry lists it. Other lines and comments are left alone.
 - Mistakes (bad KDL, unknown settings) print a warning to stderr; the shell
   still starts.
+
+Aliases name a command or a whole pipeline:
+
+```kdl
+aliases {
+    ll "ls -l"
+    gs "^git status --short"
+    dirs "ls | where type == dir"
+}
+alias big "ls | where size > 10000000"    // one-liner form
+```
+
+Words typed after an alias are appended to its last command (`ll src` runs
+`ls -l src`). An alias can use other aliases or wrap the command it shadows
+(`ls "ls -l"`), and `^name` always skips aliases. `aliases` lists them and
+`which <name>` shows an alias's expansion.
+
+The `prompt` block customizes the prompt. Every setting is optional; the values
+below are the defaults:
+
+```kdl
+prompt {
+    character "❯"          // input marker
+    error-character "❯"    // after a non-zero exit (defaults to `character`)
+    nerd-font #false       // default follows NIMSHELL_NERD_FONT
+    single-line #false     // #true: status and input on one line
+    blank-line #true       // empty line before each prompt
+    git #true              // show the branch
+    git-status #true       // #false skips `git status` (faster in huge repos)
+    min-duration 2000      // ms before "took …" appears
+    cwd-depth 0            // N > 0 shows only the last N dirs: …/b/c
+    colors {
+        cwd "bold cyan"
+        branch "bold purple"
+        git "bold red"
+        duration "bold yellow"
+        error "bold red"
+        character "bold green"
+        error-character "bold red"
+    }
+}
+```
+
+A style is a combination of the words `bold`, `dim`, `italic` and `underline`,
+plus a color: `black`, `red`, `green`, `yellow`, `blue`, `purple`/`magenta`,
+`cyan` or `white` (with an optional `bright-` prefix), or a hex color like
+`#ff8800`. `none` means no styling.
 
 ## Examples
 
@@ -189,9 +241,9 @@ $env.HOME
 $env.PATH                     # a list of directories (joined with `:` for externals)
 $env.PATH = $env.PATH | append ~/.local/bin
 $PATH = $PATH | prepend ~/bin # `$PATH` is shorthand for `$env.PATH`
-add-path ~/.local/bin         # like fish_add_path: prepend + remember for new sessions
+add-path ~/.local/bin         # like fish_add_path: prepend + save to config.kdl
 add-path --no-save ./bin      # this session only
-remove-path ~/.local/bin      # undo (also forgets it)
+remove-path ~/.local/bin      # undo (also removes it from config.kdl)
 $env.MY_VAR = hello
 echo $env.MY_VAR
 
@@ -242,7 +294,7 @@ Table/list: `where`/`filter`, `find`, `select`, `get`, `first`, `last`, `take`,
 
 Data: `echo`, `range`, `lines`, `input` (multi-line paste / stdin until Ctrl+D),
 `to`/`from` (subcommands `json`, `jwt`), `type`, `describe`, `env`, `sys`, `ps`,
-`whyport`, `now`, `which`, `add-path` (alias `add_to_path`), `remove-path`, `help`, `about`, `exit`
+`whyport`, `now`, `which`, `aliases`, `add-path` (alias `add_to_path`), `remove-path`, `help`, `about`, `exit`
 
 HTTP: `http get|post|put|delete|patch|head` — fetch/send with structured JSON
 bodies and responses (`http get https://example.com`, `http post URL {a: 1}`,
@@ -267,9 +319,6 @@ pagers forced to `cat` (plus `FORCE_COLOR` / `CLICOLOR_FORCE` and a git
 **same builtin pager** when the text does not fit on one screen.
 
 Unknown command names fall through to external executables on `PATH`.
-Directories saved with `add-path` live in `$XDG_CONFIG_HOME/nimshell/paths`
-(default `~/.config/nimshell/paths`, one per line) and are prepended to `PATH`
-when nimshell starts.
 
 ## Layout
 

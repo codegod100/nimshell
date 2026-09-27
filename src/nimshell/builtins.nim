@@ -3,7 +3,7 @@
 import std/[algorithm, base64, httpclient, json, net, options, os, strutils,
             tables, times, uri]
 from std/unicode import runes, `$`, validateUtf8, toLower
-import color, display, env, netclient, pager, syntax, sys, update, value
+import alias, color, config, display, env, netclient, pager, syntax, sys, update, value
 
 type
   BuiltinResultKind* = enum
@@ -172,10 +172,11 @@ proc helpText(): Table[string, string] =
     "type": "type — alias for typeof",
     "describe": "describe — record with type, length, and string form of input",
     "env": "env [NAME] — process environment table, or one var (same as `$env` / `$env.NAME`)",
-    "which": "which [-a|--all] [-f|--follow] <name> — path of command (builtin or on PATH); -a all matches, -f follow symlinks",
-    "add-path": "add-path [-n|--no-save] <dir>… — prepend dirs to PATH and remember them for new sessions (like fish_add_path)",
+    "which": "which [-a|--all] [-f|--follow] <name> — path of command (alias, builtin or on PATH); -a all matches, -f follow symlinks",
+    "aliases": "aliases — table of command aliases from config.kdl (name, expansion)",
+    "add-path": "add-path [-n|--no-save] <dir>… — prepend dirs to PATH and save them to config.kdl (like fish_add_path)",
     "add_to_path": "add_to_path — alias for add-path",
-    "remove-path": "remove-path <dir>… — remove dirs from PATH and from the saved add-path list",
+    "remove-path": "remove-path <dir>… — remove dirs from PATH and from config.kdl",
     "exit": "exit [code] — leave the shell (default code 0)",
     "quit": "quit [code] — alias for exit",
     "ignore": "ignore — discard pipeline input; emit nothing",
@@ -1102,9 +1103,13 @@ proc pathDirArg(env: Env, v: Value): string =
 proc pathResult(env: Env): BuiltinResult =
   ok(setExit(env, 0), getVar(env, "env.PATH"))
 
+proc currentPathDirs(): seq[string] =
+  for part in getEnv("PATH").split(':'):
+    if part != "": result.add part
+
 proc cmdAddPath(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinResult =
-  ## Like fish's `fish_add_path`: prepend dirs to `PATH` (skipping ones already
-  ## there) and remember them in `userPathsFile()` for future sessions.
+  ## Like fish's `fish_add_path`: move/prepend dirs to the front of `PATH` and
+  ## save them as `path "…"` lines in config.kdl for future sessions.
   let (noSave, stolen) = findBoolFlag(flags, ["n", "no-save"])
   let dirsIn = args & stolen
   if dirsIn.len == 0:
@@ -1114,21 +1119,14 @@ proc cmdAddPath(env: Env, input: Value, args: seq[Value], flags: Flags): Builtin
     let d = pathDirArg(env, v)
     if not dirExists(d): return err(env, "add-path: not a directory: " & d)
     if d notin dirs: dirs.add d
-  var path = currentPathDirs()
-  var fresh: seq[string]
-  for d in dirs:
-    if d notin path: fresh.add d
-  if fresh.len > 0: setenv("PATH", (fresh & path).join(":"))
+  updatePath(dirs, prepend = true)
   if not noSave:
-    var saved = loadUserPaths()
-    for d in dirs:
-      if d notin saved: saved.add d
-    let (okSave, msg) = saveUserPaths(saved)
-    if not okSave: return err(env, "add-path: " & msg)
+    let msg = addConfigPaths(dirs)
+    if msg != "": return err(env, "add-path: " & msg)
   pathResult(env)
 
 proc cmdRemovePath(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinResult =
-  ## Undo `add-path`: drop dirs from `PATH` and from the saved list.
+  ## Undo `add-path`: drop dirs from `PATH` and from config.kdl.
   if args.len == 0:
     return err(env, "remove-path: expected directory (try `remove-path <dir>…`)")
   var dirs: seq[string]
@@ -1137,14 +1135,8 @@ proc cmdRemovePath(env: Env, input: Value, args: seq[Value], flags: Flags): Buil
   for d in currentPathDirs():
     if d notin dirs: path.add d
   setenv("PATH", path.join(":"))
-  var saved: seq[string]
-  var changed = false
-  for d in loadUserPaths():
-    if d in dirs or pathDirArg(env, strV(d)) in dirs: changed = true
-    else: saved.add d
-  if changed:
-    let (okSave, msg) = saveUserPaths(saved)
-    if not okSave: return err(env, "remove-path: " & msg)
+  let msg = removeConfigPaths(dirs)
+  if msg != "": return err(env, "remove-path: " & msg)
   pathResult(env)
 
 proc cmdWhich(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinResult =
@@ -1155,14 +1147,17 @@ proc cmdWhich(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinRe
   if cands.len != 1: return err(env, "which: expected name (try `which [-a] [-f] <name>`)")
   let name = asString(cands[0])
   let builtin = isBuiltin(name)
+  let aliasText = if isAlias(name): "alias: " & name & " = " & aliases[name].source else: ""
   if all:
     var matches: seq[Value]
+    if aliasText != "": matches.add strV(aliasText)
     if builtin: matches.add strV("builtin: " & name)
     for p in whichAll(name): matches.add strV(whichMaybeFollow(follow, p))
     case matches.len
     of 0: return err(env, "which: " & name & " not found")
     of 1: return ok(env, matches[0])
     else: return ok(env, listV(matches))
+  if aliasText != "": return ok(env, strV(aliasText))
   if builtin: return ok(env, strV("builtin: " & name))
   let (found, path) = which(name)
   if found: ok(env, strV(whichMaybeFollow(follow, path)))
@@ -1371,6 +1366,11 @@ proc cmdSelfUpdate(env: Env, input: Value, args: seq[Value], flags: Flags): Buil
   if r.updated: ok(env, strV(r.message & " (restart nimshell to use it)"))
   else: ok(env, strV(r.message))
 
+proc cmdAliases(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinResult =
+  var rows: seq[seq[Value]]
+  for n in aliasNames(): rows.add @[strV(n), strV(aliases[n].source)]
+  ok(env, tableV(@["name", "expansion"], rows))
+
 proc cmdVersion(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinResult =
   let image = appImagePath()
   ok(env, recordV(@[("version", strV(NimshellVersion)),
@@ -1470,6 +1470,7 @@ let registryTable = {
   "less": cmdLess,
   "self-update": cmdSelfUpdate,
   "version": cmdVersion,
+  "aliases": cmdAliases,
 }.toTable
 
 proc lookup*(name: string, b: var Builtin): bool =

@@ -1,7 +1,7 @@
 ## Evaluate pipelines against the environment.
 
 import std/[strutils, tables]
-import builtins, env, parser, sys, value
+import alias, builtins, env, parser, sys, value
 
 type
   EvalResultKind* = enum
@@ -142,6 +142,7 @@ proc evalPipeline(env: Env, pipeline: Pipeline, input: Value, allowTty: bool): E
   ## `allowTty` — when true, the last stage runs on a live TTY unless it is a
   ## known nested-pager tool. Otherwise output is captured.
   result = cont(env, input)
+  let pipeline = expandAliases(pipeline)
   for i, cmd in pipeline.commands:
     if result.kind == erQuit or result.value.kind == vkFail: return
     let isLast = i + 1 == pipeline.commands.len

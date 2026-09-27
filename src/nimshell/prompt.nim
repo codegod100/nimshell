@@ -5,6 +5,7 @@
 ##
 ## Works in any terminal: plain Unicode by default. Set `NIMSHELL_NERD_FONT=1`
 ## for Nerd Font glyphs (branch icon, terminal prompt character).
+## Customizable via the `prompt { … }` block in config.kdl (see config.nim).
 
 import std/[os, osproc, strutils]
 import color, sys
@@ -14,8 +15,32 @@ const
   boldRed = "\e[1;31m"
   boldCyan = "\e[1;36m"
   boldPurple = "\e[1;35m"
+  boldGreen = "\e[1;32m"
+
+type PromptConfig* = object
+  ## Prompt settings; `defaultPromptConfig()` is the zero-config look.
+  character*: string       ## prompt character ("" = ❯, or the Nerd Font glyph)
+  errorCharacter*: string  ## after a non-zero exit ("" = same as `character`)
+  nerdFont*: int           ## -1 = from NIMSHELL_NERD_FONT, 0 = off, 1 = on
+  singleLine*: bool        ## status and input on one line
+  blankLine*: bool         ## empty line before each prompt
+  git*: bool               ## show the branch
+  gitStatus*: bool         ## run `git status` for the [!+?] ⇡⇣ markers
+  minDurationMs*: int64    ## show "took …" at or above this
+  cwdDepth*: int           ## show only the last N path components (0 = all)
+  cwdStyle*, branchStyle*, gitStyle*, durationStyle*, errorStyle*,
+    characterStyle*, errorCharacterStyle*: string  ## ANSI SGR codes
+
+proc defaultPromptConfig*(): PromptConfig =
+  PromptConfig(nerdFont: -1, blankLine: true, git: true, gitStatus: true,
+               minDurationMs: 2000, cwdStyle: boldCyan, branchStyle: boldPurple,
+               gitStyle: boldRed, durationStyle: boldYellow, errorStyle: boldRed,
+               characterStyle: boldGreen, errorCharacterStyle: boldRed)
+
+var promptConfig* = defaultPromptConfig()
 
 proc nerdFont*(): bool =
+  if promptConfig.nerdFont >= 0: return promptConfig.nerdFont == 1
   getEnv("NIMSHELL_NERD_FONT") notin ["", "0", "false", "no"]
 
 # --- git (branch from .git files; status from `git status`) ---
@@ -122,6 +147,15 @@ proc displayCwd*(cwd: string): string =
   elif cwd.startsWith(home & "/"): "~" & cwd[home.len .. ^1]
   else: cwd
 
+proc truncateCwd*(shown: string, depth: int): string =
+  ## Keep the last `depth` components of a displayed path (`…/a/b`).
+  if depth <= 0: return shown
+  let parts = shown.split('/')
+  # "/a/b" splits to ["", "a", "b"]; "~/a" to ["~", "a"]
+  let real = if parts.len > 0 and parts[0] == "": parts.len - 1 else: parts.len
+  if real <= depth: shown
+  else: "…/" & parts[^depth .. ^1].join("/")
+
 proc formatDuration*(ms: int64): string =
   ## `850ms`, `3.2s`, `1m5s`, `2h3m`.
   if ms < 1000: $ms & "ms"
@@ -134,34 +168,40 @@ proc formatDuration*(ms: int64): string =
 
 proc statusLine*(on: bool, cwd, branch, gitText: string, lastExit: int,
                  durationMs: int64, nerd: bool): string =
-  ## First prompt line (pure; tested).
-  result = paint(on, boldCyan, displayCwd(cwd))
+  ## First prompt line (pure given `promptConfig`; tested).
+  let c = promptConfig
+  result = paint(on, c.cwdStyle, truncateCwd(displayCwd(cwd), c.cwdDepth))
   if branch != "":
     let icon = if nerd: " " else: ""
-    result.add separator(on, " on ") & paint(on, boldPurple, icon & branch)
-    if gitText != "": result.add " " & paint(on, boldRed, gitText)
-  if durationMs >= 2000:
-    result.add separator(on, " took ") & paint(on, boldYellow, formatDuration(durationMs))
+    result.add separator(on, " on ") & paint(on, c.branchStyle, icon & branch)
+    if gitText != "": result.add " " & paint(on, c.gitStyle, gitText)
+  if durationMs >= c.minDurationMs:
+    result.add separator(on, " took ") & paint(on, c.durationStyle, formatDuration(durationMs))
   if lastExit != 0:
-    result.add " " & paint(on, boldRed, "✘ " & $lastExit)
+    result.add " " & paint(on, c.errorStyle, "✘ " & $lastExit)
 
 proc promptChar*(on: bool, lastExit: int, nerd: bool): string =
   ## Green on success, red after a non-zero exit.
-  if nerd:
-    # PUA glyphs often draw ~2 cells wide while the terminal advances one.
-    let icon = ""
-    (if lastExit == 0: promptCharacterOk(on, icon) else: promptCharacterErr(on, icon)) & "  "
-  else:
-    (if lastExit == 0: promptCharacterOk(on, "❯") else: promptCharacterErr(on, "❯")) & " "
+  let c = promptConfig
+  # PUA glyphs often draw ~2 cells wide while the terminal advances one.
+  let useNerd = nerd and c.character == ""
+  let ok = if c.character != "": c.character elif nerd: "" else: "❯"
+  let err = if c.errorCharacter != "": c.errorCharacter else: ok
+  (if lastExit == 0: paint(on, c.characterStyle, ok)
+   else: paint(on, c.errorCharacterStyle, err)) & (if useNerd: "  " else: " ")
 
 proc render*(cwd: string, lastExit: int, durationMs: int64): string =
   ## Print the status line (blank line first) and return the editor prompt.
+  ## With `single-line`, the status line is part of the returned prompt.
+  let c = promptConfig
   let on = enabled()
   let nerd = nerdFont()
-  let branch = gitBranch(cwd)
-  let gitText = if branch != "": gitStatusText(gitStatus(cwd)) else: ""
-  println("")
-  println(statusLine(on, cwd, branch, gitText, lastExit, durationMs, nerd))
+  let branch = if c.git: gitBranch(cwd) else: ""
+  let gitText = if branch != "" and c.gitStatus: gitStatusText(gitStatus(cwd)) else: ""
+  if c.blankLine: println("")
+  let status = statusLine(on, cwd, branch, gitText, lastExit, durationMs, nerd)
+  if c.singleLine: return status & " " & promptChar(on, lastExit, nerd)
+  println(status)
   promptChar(on, lastExit, nerd)
 
 

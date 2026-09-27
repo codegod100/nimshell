@@ -1,7 +1,7 @@
 ## Test suite — ported from gleshell's gleeunit tests.
 
 import std/[options, os, strutils, unittest]
-import ../src/nimshell/[builtins, color, config, kdl, display, env, eval, highlight, lexer,
+import ../src/nimshell/[alias, builtins, color, config, kdl, display, env, eval, highlight, lexer,
                         lineedit, netclient, pager, parser, prompt, syntax, sys,
                         update, value]
 
@@ -223,35 +223,40 @@ suite "eval":
     check rows == listV(@[strV("/a:/b")])
     putEnv("PATH", saved)
 
-  test "add-path / remove-path persist":
+  test "add-path / remove-path edit config.kdl":
     let savedPath = getEnv("PATH")
     let savedCfg = getEnv("XDG_CONFIG_HOME")
     let tmp = getTempDir() / "nimshell-addpath-test"
     removeDir(tmp)
     createDir(tmp / "bin")
     createDir(tmp / "bin2")
+    createDir(tmp / "cfg" / "nimshell")
     putEnv("XDG_CONFIG_HOME", tmp / "cfg")
+    let cfg = configFile()
+    writeFile(cfg, "// keep me\npath {\n    append \"/opt/x\"\n}\n")
     putEnv("PATH", "/usr/bin:/bin")
     let v = evalOk("add_to_path " & (tmp / "bin"))
     check v.kind == vkList and v.items[0] == strV(tmp / "bin")
     check getEnv("PATH") == (tmp / "bin") & ":/usr/bin:/bin"
-    check loadUserPaths() == @[tmp / "bin"]
-    # already on PATH: no duplicate, stays saved once
+    check readFile(cfg) == "// keep me\npath {\n    append \"/opt/x\"\n}\npath \"" &
+      (tmp / "bin") & "\"\n"
+    # already saved: no duplicate line
     discard evalOk("add-path " & (tmp / "bin"))
-    check getEnv("PATH") == (tmp / "bin") & ":/usr/bin:/bin"
-    check loadUserPaths() == @[tmp / "bin"]
+    check configPathDirs() == @["/opt/x", tmp / "bin"]
     # --no-save changes PATH only
     discard evalOk("add-path --no-save " & (tmp / "bin2"))
     check getEnv("PATH").startsWith((tmp / "bin2") & ":")
-    check loadUserPaths() == @[tmp / "bin"]
+    check configPathDirs() == @["/opt/x", tmp / "bin"]
     check evalOk("add-path " & (tmp / "missing")).kind == vkFail
-    # new session: saved dirs are prepended, duplicates dropped
-    putEnv("PATH", "/usr/bin:" & (tmp / "bin"))
-    applyUserPaths()
-    check getEnv("PATH") == (tmp / "bin") & ":/usr/bin"
-    discard evalOk("remove-path " & (tmp / "bin"))
-    check getEnv("PATH") == "/usr/bin"
-    check loadUserPaths().len == 0
+    # removal drops the line and the dir inside the block
+    discard evalOk("remove-path " & (tmp / "bin") & " /opt/x")
+    check (tmp / "bin") notin getEnv("PATH").split(':')
+    check readFile(cfg) == "// keep me\npath {\n}\n"
+    # legacy `paths` file migrates into config.kdl
+    writeFile(tmp / "cfg" / "nimshell" / "paths", (tmp / "bin2") & "\n")
+    check loadConfig().len == 0
+    check not fileExists(tmp / "cfg" / "nimshell" / "paths")
+    check configPathDirs() == @[tmp / "bin2"]
     putEnv("PATH", savedPath)
     putEnv("XDG_CONFIG_HOME", savedCfg)
     removeDir(tmp)
@@ -825,3 +830,91 @@ suite "config":
     putEnv("XDG_CONFIG_HOME", "/cfg")
     check configFile() == "/cfg/nimshell/config.kdl"
     if saved == "": delEnv("XDG_CONFIG_HOME") else: putEnv("XDG_CONFIG_HOME", saved)
+
+suite "prompt config":
+  teardown: promptConfig = defaultPromptConfig()
+  test "styles":
+    var code: string
+    check parseStyle("bold cyan", code) and code == "\e[1;36m"
+    check parseStyle("bright-magenta", code) and code == "\e[95m"
+    check parseStyle("italic #ff8800", code) and code == "\e[3;38;2;255;136;0m"
+    check parseStyle("none", code) and code == ""
+    check not parseStyle("sparkly", code)
+  test "cwd truncation":
+    check truncateCwd("~/a/b/c", 2) == "…/b/c"
+    check truncateCwd("/a/b/c", 3) == "/a/b/c"
+    check truncateCwd("~/a", 2) == "~/a"
+    check truncateCwd("/x/y", 0) == "/x/y"
+  test "defaults unchanged":
+    check applyConfig("").len == 0
+    check promptChar(false, 0, false) == "❯ "
+    check statusLine(false, "/tmp", "", "", 1, 3200, false) == "/tmp took 3.2s ✘ 1"
+  test "prompt block":
+    let warnings = applyConfig("""
+      prompt {
+        character "λ"
+        error-character "✗"
+        nerd-font #false
+        single-line #true
+        blank-line #false
+        git-status #false
+        min-duration 500
+        cwd-depth 1
+        colors { character "bold blue"; error "#ff0000" }
+      }
+    """)
+    check warnings.len == 0
+    let c = promptConfig
+    check c.singleLine and not c.blankLine and not c.gitStatus and c.git
+    check c.nerdFont == 0 and not nerdFont()
+    check promptChar(false, 0, false) == "λ "
+    check promptChar(false, 1, false) == "✗ "
+    check promptChar(true, 0, true) == "\e[1;34mλ\e[0m "
+    check statusLine(false, "/a/b", "", "", 0, 600, false) == "…/b took 600ms"
+    check "\e[38;2;255;0;0m✘ 1" in statusLine(true, "/a", "", "", 1, 0, false)
+  test "prompt warnings":
+    check applyConfig("prompt { sparkle #true }").len == 1
+    check applyConfig("prompt { single-line \"yes\" }").len == 1
+    check applyConfig("prompt { colors { cwd \"sparkly\" } }").len == 1
+    check applyConfig("prompt { colors { nope \"red\" } }").len == 1
+
+suite "aliases":
+  teardown: clearAliases()
+  test "config block and one-liner":
+    let warnings = applyConfig("""
+      aliases {
+        five "range 5"
+        top3 "range 10 | reverse | first 3"
+      }
+      alias two "five | first 2"
+    """)
+    check warnings.len == 0
+    check aliasNames() == @["five", "top3", "two"]
+    check evalOk("top3") == evalOk("range 10 | reverse | first 3")
+    # alias of an alias, and use mid-pipeline
+    check evalOk("two") == evalOk("range 5 | first 2")
+    check evalOk("five | first 1") == evalOk("range 5 | first 1")
+  test "extra words go to the last command":
+    check defineAlias("rev", "range 10 | first") == ""
+    check evalOk("rev 2") == evalOk("range 10 | first 2")
+  test "an alias can wrap the name it shadows":
+    check defineAlias("range", "range 3") == ""
+    check evalOk("range") == evalOk("echo [0 1 2]")
+  test "in let and which":
+    check defineAlias("five", "range 5") == ""
+    let (e, _) = evalEnv("let x = five")
+    check getVar(e, "x") == evalOk("range 5")
+    check evalOk("which five") == strV("alias: five = range 5")
+    check evalOk("aliases").kind == vkTable
+  test "applyConfig replaces aliases":
+    check applyConfig("alias a \"range 1\"").len == 0
+    check applyConfig("").len == 0
+    check not isAlias("a")
+  test "bad aliases warn":
+    check defineAlias("bad name", "ls") != ""
+    check defineAlias("let", "ls") != ""
+    check defineAlias("x", "let y = 1") != ""
+    check defineAlias("x", "ls |") != ""
+    check applyConfig("aliases { x 1 }").len == 1
+    check applyConfig("alias x").len == 1
+    check not isAlias("x")
