@@ -197,7 +197,7 @@ proc helpText(): Table[string, string] =
     "whyport": "whyport [-a|--all] [-l|--long] <port> — who is bound to a TCP/UDP port",
     "now": "now — current time as Unix epoch seconds (prints as local datetime)",
     "about": "about — authorship, ATProto handle, and a little sparkle",
-    "less": "less [file]… — page pipeline input or files (ANSI colors kept)",
+    "less": "less [-S] [file]… — page pipeline input or files (ANSI colors kept)",
   }.toTable
 
 proc missingHelp*(): seq[string] =
@@ -324,23 +324,30 @@ proc helpFor(name: string): Option[string] =
     ].join("\n"))
   of "less":
     some(@[
-      "less [file]… — page pipeline input or files (ANSI colors kept)",
+      "less [-S|--chop-long-lines] [file]… — page pipeline input or files (ANSI colors kept)",
       "",
       "Builtin pager inspired by less -FRX: colors from tools and nimshell",
       "tables pass through; if the text fits on one screen (or stdout is not",
       "a TTY), it is printed and the pager exits. Use `^less` for the",
       "external binary on PATH.",
       "",
+      "Flags:",
+      "  -S, --chop-long-lines  cut long lines at the window edge instead of",
+      "                         wrapping them; scroll sideways with ← / →",
+      "",
       "Keys (interactive):",
       "  j / ↓ / Enter     line down     k / ↑        line up",
       "  space / f / PgDn  page down     b / PgUp     page up",
       "  g / Home          top           G / End      bottom",
       "  mouse wheel       scroll (hold Shift to select text)",
+      "  S                 toggle chop mode: cut long lines instead of wrapping",
+      "  ← / →             scroll sideways (chop mode)   0 / $  left / right edge",
       "  /pattern          live search   n / N        next/prev",
-      "  h / ?             help          q / Ctrl+C   quit",
+      "  ?                 help          q / Ctrl+C   quit",
       "",
       "Examples:",
       "  ls | less",
+      "  less -S server.log",
       "  cat README.md | less",
       "  less README.md",
       "  ^jj log | less",
@@ -1279,6 +1286,9 @@ proc cmdWhyport(env: Env, input: Value, args: seq[Value], flags: Flags): Builtin
 # --- less ---
 
 proc cmdLess(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinResult =
+  # `-S` / `--chop-long-lines` may steal a following file name as its value.
+  let (chop, stolen) = findBoolFlag(flags, ["S", "chop-long-lines"])
+  let args = args & stolen
   var text = ""
   if args.len == 0:
     case input.kind
@@ -1294,8 +1304,8 @@ proc cmdLess(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinRes
       if not success: return err(env, "less: " & msg)
       parts.add content
     text = parts.join("\n")
-  if needsPaging(text):
-    pager.run(text)
+  if needsPaging(text, chop):
+    pager.run(text, chop)
     ok(env, nothing())
   else:
     # Fits on one screen or not a TTY: emit the text so the REPL / -c path

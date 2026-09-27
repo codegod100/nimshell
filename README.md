@@ -166,10 +166,14 @@ bodies and responses (`http get https://example.com`, `http post URL {a: 1}`,
 
 Pager: `less` — builtin color-aware pager for pipeline input or files
 (`ls | less`, `less README.md`). ANSI from tables and external tools is kept;
-short output is printed without an interactive session. The mouse wheel scrolls (hold Shift
-to select text). Interactive keys include
-live `/` search (case-insensitive, finds as you type) and `n`/`N` next/previous
-match. `^less` still runs the external binary.
+short output is printed without an interactive session. The mouse wheel
+scrolls (hold Shift to select text). Interactive keys include live `/` search
+(case-insensitive, finds as you type) and `n`/`N` next/previous match.
+Long lines soft-wrap by default; `less -S` (or pressing `S` in the pager)
+switches to chop mode like `less -S`: lines are cut at the window edge, `←`/`→`
+scroll sideways by half a screen, `0`/`$` jump to the left/right edge, and
+search scrolls sideways to bring the match into view. `^less` still runs the
+external binary.
 
 External commands inherit the live TTY so long-lived processes (dev servers,
 builds) stream output as they run. Tools that would spawn system `less`

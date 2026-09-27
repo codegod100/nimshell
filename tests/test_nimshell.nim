@@ -590,3 +590,31 @@ suite "fit to terminal width":
   test "embedded newlines stay on one row":
     let t = tableV(@["a"], @[@[strV("one\ntwo")]])
     check renderWith(false, t).splitLines.len == 5
+
+suite "pager chop mode (less -S)":
+  test "logical lines":
+    check logicalLines("a\r\nb\rc\nd") == @["a", "b", "c", "d"]
+  test "slice visible":
+    check sliceVisible("abcdefgh", 0, 3) == "abc"
+    check sliceVisible("abcdefgh", 2, 3) == "cde"
+    check sliceVisible("abcdefgh", 6, 5) == "gh"
+    check sliceVisible("abc", 5, 3) == ""
+    # color opened left of the window still applies; reset appended
+    let s = sliceVisible("\e[32mabcdef\e[0m", 2, 2)
+    check s.startsWith("\e[32m") and stripAnsi(s) == "cd" and s.endsWith("\e[0m")
+  test "match column":
+    check matchColumn("\e[31mhello\e[0m world", "WORLD") == 6
+    check matchColumn("hello", "zzz") == -1
+    check matchColumn("hello", "") == -1
+  test "scroll to show match":
+    let line = "x".repeat(100) & "needle"
+    check hoffShowing(line, "needle", 0, 40) == 90   # 100 - 40 div 4
+    check hoffShowing(line, "needle", 80, 40) == 80  # already visible
+    check hoffShowing(line, "nope", 7, 40) == 7
+  test "less -S flag":
+    check evalOk("echo hello | less -S") == strV("hello")
+    let path = getTempDir() / "nimshell_less_s.txt"
+    writeFile(path, "short\n")
+    check evalOk("less -S " & path) == strV("short\n")
+    removeFile(path)
+    check "--chop-long-lines" in evalOk("help less").s

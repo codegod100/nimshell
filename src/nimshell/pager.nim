@@ -47,11 +47,44 @@ proc displayLines*(text: string, cols: int): seq[string] =
   for line in t.split("\n"):
     result.add wrapLine(line, max(1, cols))
 
-proc needsPaging*(text: string): bool =
+proc logicalLines*(text: string): seq[string] =
+  ## Lines as written (no soft wrap) — the unit of chop (`less -S`) mode.
+  text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+
+proc sliceVisible*(line: string, start, width: int): string =
+  ## Visible columns `[start, start + width)` of `line`. Every escape sequence
+  ## up to the right edge is kept, so colors opened left of the window still
+  ## apply; a reset is appended when the line carried any escapes.
+  var vis = 0
+  var sawEsc = false
+  for (a, n, esc) in ansiScan(line):
+    if esc:
+      result.add line[a ..< a + n]
+      sawEsc = true
+    else:
+      if vis >= start + width: break
+      if vis >= start: result.add line[a ..< a + n]
+      inc vis
+  if sawEsc: result.add "\e[0m"
+
+proc wrapWithOrigins(logical: seq[string], cols: int): (seq[string], seq[int]) =
+  ## Soft-wrapped lines plus, for each, the index of its logical line.
+  for i, l in logical:
+    for piece in wrapLine(l, cols):
+      result[0].add piece
+      result[1].add i
+
+proc needsPaging*(text: string, chop = false): bool =
   ## True when stdout is a TTY and wrapping `text` to the terminal width yields
   ## more lines than fit on one screen (minus the status row).
   let (ok, rows, cols) = termSize()
   if not ok: return false
+  if chop:
+    let lines = logicalLines(text)
+    if lines.len > pageHeight(rows): return true
+    for l in lines:
+      if visibleLength(l) > cols: return true
+    return false
   displayLines(text, cols).len > pageHeight(rows)
 
 proc lineMatches*(line, pattern: string): bool =
@@ -73,6 +106,22 @@ proc matchRanges(plain, pattern: string): seq[(int, int)] =
       i += pat.len
     else:
       inc i
+
+proc matchColumn*(line, pattern: string): int =
+  ## Visible column of the first case-insensitive match, or -1.
+  if pattern == "": return -1
+  let r = matchRanges(toLower(stripAnsi(line)), toLower(pattern))
+  if r.len == 0: -1 else: r[0][0]
+
+proc hoffShowing*(line, pattern: string, hoff, cols: int): int =
+  ## Horizontal offset that brings the first match in `line` into view:
+  ## unchanged if already visible, otherwise the match lands a quarter of
+  ## the way into the window.
+  let col = matchColumn(line, pattern)
+  if col < 0: return hoff
+  let plen = visibleLength(pattern)
+  if col >= hoff and col + plen <= hoff + cols: hoff
+  else: max(0, col - cols div 4)
 
 proc highlightMatches*(line, pattern: string): string =
   ## Wrap each non-overlapping fixed-string match in black-on-bright-yellow.
@@ -146,7 +195,8 @@ proc padStatus(text: string, cols: int): string =
   let vis = visibleLength(text)
   if vis >= cols: text else: text & " ".repeat(cols - vis)
 
-proc statusLine(offset, height, total, cols: int, message: Option[string]): string =
+proc statusLine(offset, height, total, cols: int, message: Option[string],
+                chop = false, hoff = 0): string =
   var plain: string
   if message.isSome:
     plain = " " & message.get & " "
@@ -158,21 +208,28 @@ proc statusLine(offset, height, total, cols: int, message: Option[string]): stri
         let bottom = min(total, offset + height)
         " " & $(offset + 1) & "-" & $bottom & "/" & $total & " (" &
           $(bottom * 100 div total) & "%) "
-    let help = " q:quit  /:search  n/N  j/k:line  space/b:page  g/G  h:help "
-    plain = if visibleLength(label & help) > cols: label else: label & help
+    let mode = if chop: (if hoff > 0: "[chop col " & $(hoff + 1) & "] " else: "[chop] ")
+               else: ""
+    let help = if chop: " q:quit  /:search  ←/→:scroll  S:wrap  h:help "
+               else: " q:quit  /:search  n/N  j/k:line  space/b:page  S:chop  h:help "
+    plain = if visibleLength(label & mode & help) > cols: label & mode
+            else: label & mode & help
   let body = if enabled(): "\e[7m" & padStatus(plain, cols) & "\e[0m"
              else: padStatus(plain, cols)
   body & "\e[K"
 
 proc redraw(lines: seq[string], offset, height, cols: int,
-            pattern, message: Option[string]) =
+            pattern, message: Option[string], chop = false, hoff = 0) =
+  ## In chop mode `lines` are logical lines, cut to the window at column
+  ## `hoff`; otherwise they are already soft-wrapped to `cols`.
   var buf = "\e[H\e[2J\e[0m"
   for k in 0 ..< height:
     let i = offset + k
     var line = if i < lines.len: lines[i] else: ""
     if pattern.isSome: line = highlightMatches(line, pattern.get)
+    if chop: line = sliceVisible(line, hoff, cols)
     buf.add line & "\e[K\r\n"
-  buf.add "\e[0m" & statusLine(offset, height, lines.len, cols, message)
+  buf.add "\e[0m" & statusLine(offset, height, lines.len, cols, message, chop, hoff)
   sys.write(buf)
 
 proc drawSearchStatus(cols: int, query: string, message: Option[string]) =
@@ -194,12 +251,17 @@ proc isSearchChar(key: string): bool =
   not key.startsWith("ctrl_") and key.runeLen == 1
 
 proc liveSearch(lines: seq[string], startOffset, height, cols: int,
-                entered: var string, viewOffset: var int): bool =
+                entered: var string, viewOffset: var int,
+                chop: bool, hoff: var int): bool =
   ## Live incremental search. Returns false on cancel.
   var query = ""
   while true:
     let (off, paintP, status) = liveSearchPreview(lines, query, startOffset)
-    redraw(lines, off, height, cols, paintP, none(string))
+    # Chop mode: scroll sideways so the live match is on screen.
+    let h = if chop and paintP.isSome and off < lines.len:
+              hoffShowing(lines[off], query, hoff, cols)
+            else: hoff
+    redraw(lines, off, height, cols, paintP, none(string), chop, h)
     drawSearchStatus(cols, query, status)
     let key = readKeyName()
     case key
@@ -207,6 +269,7 @@ proc liveSearch(lines: seq[string], startOffset, height, cols: int,
     of "enter":
       entered = query
       viewOffset = off
+      hoff = h
       return true
     of "backspace": query = dropLastRune(query)
     of "ctrl_u": query = ""
@@ -221,6 +284,9 @@ proc showHelp(height, cols: int) =
     "  j / ↓ / Enter     one line down",
     "  k / ↑             one line up",
     "  mouse wheel       scroll 3 lines (hold Shift to select text)",
+    "  S                 toggle chop mode (like less -S): cut long lines",
+    "  ← / → (h / l)     scroll sideways half a screen (chop mode)",
+    "  0 / $             jump to the left / right edge (chop mode)",
     "  space / f / PgDn  one page down",
     "  b / PgUp          one page up",
     "  g / Home          top",
@@ -228,7 +294,7 @@ proc showHelp(height, cols: int) =
     "  /pattern          live search forward (fixed string, ignore case)",
     "  n / N             next / previous match",
     "  Ctrl+L            redraw",
-    "  h / ?             this help",
+    "  ? (h when wrapping) this help",
     "  q / Q / Ctrl+C    quit",
     "",
     "ANSI colors from tools and tables are kept (like less -R).",
@@ -238,22 +304,31 @@ proc showHelp(height, cols: int) =
   redraw(displayLines(text, cols), 0, height, cols, none(string), none(string))
   discard readKeyName()
 
-proc run*(text: string) =
+proc maxLineWidth(lines: seq[string]): int =
+  for l in lines: result = max(result, visibleLength(l))
+
+proc run*(text: string, chop = false) =
   ## Interactive page session. Call only when `needsPaging` is true.
+  ## `chop` starts in `less -S` mode: long lines are cut at the window edge
+  ## and ←/→ scroll sideways; `S` toggles between chop and soft wrap.
   ## Leaves the alternate screen on exit; does not print the text afterwards.
   let (ok, rows, cols) = termSize()
   if not ok: return
   let height = pageHeight(rows)
-  let lines = displayLines(text, cols)
-  let total = lines.len
-  let maxOff = max(0, total - height)
+  let logical = logicalLines(text)
+  let (wrapped, origins) = wrapWithOrigins(logical, cols)
+  let widest = maxLineWidth(logical)
+  let hstep = max(1, cols div 2) # like less: half a screen per ←/→
+  var chop = chop
   withKeyMode:
     # Alternate screen + mouse reporting (button events, SGR encoding) so the
     # scroll wheel reaches us. Hold Shift to select text in most terminals.
     sys.write("\e[?1049h\e[H\e[?1000h\e[?1006h")
     var offset = 0
+    var hoff = 0
     var pattern = none(string)
     var message = none(string)
+    template lines(): seq[string] = (if chop: logical else: wrapped)
     proc search(forward: bool) =
       if pattern.isNone:
         message = some("No previous pattern")
@@ -265,9 +340,12 @@ proc run*(text: string) =
       else:
         offset = r.get[0]
         if r.get[1]: message = some("Search wrapped")
+        if chop: hoff = hoffShowing(logical[offset], pattern.get, hoff, cols)
     while true:
+      let maxOff = max(0, lines.len - height)
       offset = clamp(offset, 0, maxOff)
-      redraw(lines, offset, height, cols, pattern, message)
+      hoff = if chop: clamp(hoff, 0, max(0, widest - cols)) else: 0
+      redraw(lines, offset, height, cols, pattern, message, chop, hoff)
       message = none(string)
       let key = readKeyName()
       case key
@@ -280,10 +358,33 @@ proc run*(text: string) =
       of "b", "page_up", "ctrl_b": offset -= height
       of "g", "home": offset = 0
       of "G", "end": offset = maxOff
+      of "right", "l":
+        if chop: hoff += hstep
+        else: message = some("Press S to chop long lines, then ←/→ scroll")
+      of "left", "h":
+        if chop: hoff -= hstep
+        elif key == "h": showHelp(height, cols)
+      of "0": hoff = 0
+      of "$": hoff = widest - cols
+      of "S":
+        # Keep the same logical line at the top across the switch.
+        if chop:
+          let target = offset
+          offset = 0
+          for i, o in origins:
+            if o == target:
+              offset = i
+              break
+          chop = false
+          message = some("Wrapping long lines")
+        else:
+          offset = if offset < origins.len: origins[offset] else: 0
+          chop = true
+          message = some("Chopping long lines (←/→ to scroll)")
       of "/":
         var entered = ""
         var liveOff = offset
-        if liveSearch(lines, offset, height, cols, entered, liveOff):
+        if liveSearch(lines, offset, height, cols, entered, liveOff, chop, hoff):
           if entered == "":
             # Empty Enter reuses the previous pattern.
             search(true)
@@ -292,6 +393,6 @@ proc run*(text: string) =
             offset = liveOff
       of "n": search(true)
       of "N": search(false)
-      of "h", "?": showHelp(height, cols)
+      of "?": showHelp(height, cols)
       else: discard
     sys.write("\e[?1006l\e[?1000l\e[?1049l")
