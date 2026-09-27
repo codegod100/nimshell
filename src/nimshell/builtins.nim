@@ -174,6 +174,7 @@ proc helpText(): Table[string, string] =
     "env": "env [NAME] — process environment table, or one var (same as `$env` / `$env.NAME`)",
     "which": "which [-a|--all] [-f|--follow] <name> — path of command (alias, builtin or on PATH); -a all matches, -f follow symlinks",
     "aliases": "aliases — table of command aliases from config.kdl (name, expansion)",
+    "export": "export [-n|--no-save] NAME=value — set $env.NAME and save it to config.kdl; `export NAME` saves the current value",
     "add-path": "add-path [-n|--no-save] <dir>… — prepend dirs to PATH and save them to config.kdl (like fish_add_path)",
     "add_to_path": "add_to_path — alias for add-path",
     "remove-path": "remove-path <dir>… — remove dirs from PATH and from config.kdl",
@@ -1089,6 +1090,11 @@ proc cmdEnv(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinResu
     return ok(env, tableFromRecords(rows))
   err(env, "env: unexpected args (use `env` or `env NAME`)")
 
+proc cmdExport(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinResult =
+  # `export NAME = …` is a statement (see parser); this only runs for odd
+  # spellings such as `"export"` or `export` inside a pipeline.
+  err(env, "export: usage: export [--no-save] NAME = value (as its own statement)")
+
 proc whichMaybeFollow(follow: bool, path: string): string =
   ## With `-f`/`--follow`, resolve symlinks to a canonical absolute path.
   if not follow: return path
@@ -1443,6 +1449,7 @@ let registryTable = {
   "type": cmdType,
   "describe": cmdDescribe,
   "env": cmdEnv,
+  "export": cmdExport,
   "which": cmdWhich,
   "add-path": cmdAddPath,
   "add_to_path": cmdAddPath,
