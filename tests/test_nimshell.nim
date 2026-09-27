@@ -809,3 +809,50 @@ suite "config":
     putEnv("XDG_CONFIG_HOME", "/cfg")
     check configFile() == "/cfg/nimshell/config.kdl"
     if saved == "": delEnv("XDG_CONFIG_HOME") else: putEnv("XDG_CONFIG_HOME", saved)
+
+suite "prompt config":
+  teardown: promptConfig = defaultPromptConfig()
+  test "styles":
+    var code: string
+    check parseStyle("bold cyan", code) and code == "\e[1;36m"
+    check parseStyle("bright-magenta", code) and code == "\e[95m"
+    check parseStyle("italic #ff8800", code) and code == "\e[3;38;2;255;136;0m"
+    check parseStyle("none", code) and code == ""
+    check not parseStyle("sparkly", code)
+  test "cwd truncation":
+    check truncateCwd("~/a/b/c", 2) == "…/b/c"
+    check truncateCwd("/a/b/c", 3) == "/a/b/c"
+    check truncateCwd("~/a", 2) == "~/a"
+    check truncateCwd("/x/y", 0) == "/x/y"
+  test "defaults unchanged":
+    check applyConfig("").len == 0
+    check promptChar(false, 0, false) == "❯ "
+    check statusLine(false, "/tmp", "", "", 1, 3200, false) == "/tmp took 3.2s ✘ 1"
+  test "prompt block":
+    let warnings = applyConfig("""
+      prompt {
+        character "λ"
+        error-character "✗"
+        nerd-font #false
+        single-line #true
+        blank-line #false
+        git-status #false
+        min-duration 500
+        cwd-depth 1
+        colors { character "bold blue"; error "#ff0000" }
+      }
+    """)
+    check warnings.len == 0
+    let c = promptConfig
+    check c.singleLine and not c.blankLine and not c.gitStatus and c.git
+    check c.nerdFont == 0 and not nerdFont()
+    check promptChar(false, 0, false) == "λ "
+    check promptChar(false, 1, false) == "✗ "
+    check promptChar(true, 0, true) == "\e[1;34mλ\e[0m "
+    check statusLine(false, "/a/b", "", "", 0, 600, false) == "…/b took 600ms"
+    check "\e[38;2;255;0;0m✘ 1" in statusLine(true, "/a", "", "", 1, 0, false)
+  test "prompt warnings":
+    check applyConfig("prompt { sparkle #true }").len == 1
+    check applyConfig("prompt { single-line \"yes\" }").len == 1
+    check applyConfig("prompt { colors { cwd \"sparkly\" } }").len == 1
+    check applyConfig("prompt { colors { nope \"red\" } }").len == 1

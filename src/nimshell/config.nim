@@ -10,12 +10,18 @@
 ##       append "/opt/tools/bin"
 ##   }
 ##
+##   prompt {
+##       character "λ"
+##       single-line #true
+##       colors { cwd "bold blue"; character "#ff8800" }
+##   }
+##
 ## `path "a" "b"` is shorthand for `path { prepend "a" "b" }`. Values expand a
 ## leading `~` and `$VAR` / `${VAR}`. Top-level nodes apply in file order, so
 ## `path` can use variables set by an earlier `env`.
 
 import std/[os, strutils]
-import kdl, sys
+import color, kdl, prompt, sys
 
 proc configFile*(): string =
   let xdg = getEnv("XDG_CONFIG_HOME")
@@ -83,8 +89,60 @@ proc applyEnv(n: KdlNode, warnings: var seq[string]) =
       let v = c.args[0]
       setenv(c.name, if v.kind == kkString: expandValue(v.str) else: $v)
 
+proc oneArg(c: KdlNode, kind: KdlKind, what: string, warnings: var seq[string]): bool =
+  if c.args.len == 1 and c.args[0].kind == kind: return true
+  warnings.add("line " & $c.line & ": prompt " & c.name & ": expected " & what)
+
+proc applyPromptColors(n: KdlNode, cfg: var PromptConfig, warnings: var seq[string]) =
+  for c in n.children:
+    if not oneArg(c, kkString, "a style like \"bold cyan\"", warnings): continue
+    var code: string
+    if not parseStyle(c.args[0].str, code):
+      warnings.add("line " & $c.line & ": prompt colors " & c.name &
+                   ": unknown style \"" & c.args[0].str & "\"")
+      continue
+    case c.name
+    of "cwd": cfg.cwdStyle = code
+    of "branch": cfg.branchStyle = code
+    of "git": cfg.gitStyle = code
+    of "duration": cfg.durationStyle = code
+    of "error": cfg.errorStyle = code
+    of "character": cfg.characterStyle = code
+    of "error-character": cfg.errorCharacterStyle = code
+    else: warnings.add("line " & $c.line & ": unknown prompt color `" & c.name & "`")
+
+proc applyPrompt(n: KdlNode, warnings: var seq[string]) =
+  var cfg = promptConfig
+  for c in n.children:
+    case c.name
+    of "character":
+      if oneArg(c, kkString, "a string", warnings): cfg.character = c.args[0].str
+    of "error-character":
+      if oneArg(c, kkString, "a string", warnings): cfg.errorCharacter = c.args[0].str
+    of "nerd-font":
+      if oneArg(c, kkBool, "#true or #false", warnings): cfg.nerdFont = ord(c.args[0].b)
+    of "single-line":
+      if oneArg(c, kkBool, "#true or #false", warnings): cfg.singleLine = c.args[0].b
+    of "blank-line":
+      if oneArg(c, kkBool, "#true or #false", warnings): cfg.blankLine = c.args[0].b
+    of "git":
+      if oneArg(c, kkBool, "#true or #false", warnings): cfg.git = c.args[0].b
+    of "git-status":
+      if oneArg(c, kkBool, "#true or #false", warnings): cfg.gitStatus = c.args[0].b
+    of "min-duration":
+      if oneArg(c, kkNumber, "milliseconds", warnings):
+        cfg.minDurationMs = int64(max(c.args[0].num, 0))
+    of "cwd-depth":
+      if oneArg(c, kkNumber, "a number of path components", warnings):
+        cfg.cwdDepth = int(max(c.args[0].num, 0))
+    of "colors": applyPromptColors(c, cfg, warnings)
+    else: warnings.add("line " & $c.line & ": unknown prompt setting `" & c.name & "`")
+  promptConfig = cfg
+
 proc applyConfig*(src: string): seq[string] =
-  ## Apply config text to the process environment; returns warnings.
+  ## Apply config text to the process environment and prompt settings
+  ## (which start from the defaults); returns warnings.
+  promptConfig = defaultPromptConfig()
   var nodes: seq[KdlNode]
   try: nodes = parseKdl(src)
   except KdlError as e: return @[e.msg]
@@ -92,6 +150,7 @@ proc applyConfig*(src: string): seq[string] =
     case n.name
     of "path": applyPath(n, result)
     of "env": applyEnv(n, result)
+    of "prompt": applyPrompt(n, result)
     else: result.add("line " & $n.line & ": unknown setting `" & n.name & "`")
 
 proc addConfigPaths*(dirs: seq[string]): string

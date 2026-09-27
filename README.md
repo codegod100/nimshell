@@ -18,7 +18,8 @@ values: strings, numbers, lists, records, and tables. Built-in commands like
 ╰──────┴──────╯
 ```
 
-The interactive prompt is zero-config and Starship-inspired:
+The interactive prompt is Starship-inspired and works with zero config (it can
+be customized in [`config.kdl`](#config)):
 
 - full path with `~`
 - git branch (read from `.git`) plus status from `git status`:
@@ -32,7 +33,8 @@ exit). Set `NIMSHELL_NO_TITLE=1` to leave the title alone.
 
 It uses plain Unicode, so it renders in any terminal. With a
 [Nerd Font](https://www.nerdfonts.com) installed, set `NIMSHELL_NERD_FONT=1` for a
-branch icon and the `` terminal prompt character.
+branch icon and the `` terminal prompt character (or `nerd-font #true` in
+the config).
 
 ## Quick start
 
@@ -154,6 +156,37 @@ path {
   whichever `path` entry lists it. Other lines and comments are left alone.
 - Mistakes (bad KDL, unknown settings) print a warning to stderr; the shell
   still starts.
+
+The `prompt` block customizes the prompt. Every setting is optional; the values
+below are the defaults:
+
+```kdl
+prompt {
+    character "❯"          // input marker
+    error-character "❯"    // after a non-zero exit (defaults to `character`)
+    nerd-font #false       // default follows NIMSHELL_NERD_FONT
+    single-line #false     // #true: status and input on one line
+    blank-line #true       // empty line before each prompt
+    git #true              // show the branch
+    git-status #true       // #false skips `git status` (faster in huge repos)
+    min-duration 2000      // ms before "took …" appears
+    cwd-depth 0            // N > 0 shows only the last N dirs: …/b/c
+    colors {
+        cwd "bold cyan"
+        branch "bold purple"
+        git "bold red"
+        duration "bold yellow"
+        error "bold red"
+        character "bold green"
+        error-character "bold red"
+    }
+}
+```
+
+A style is a combination of the words `bold`, `dim`, `italic` and `underline`,
+plus a color: `black`, `red`, `green`, `yellow`, `blue`, `purple`/`magenta`,
+`cyan` or `white` (with an optional `bright-` prefix), or a hex color like
+`#ff8800`. `none` means no styling.
 
 ## Examples
 
