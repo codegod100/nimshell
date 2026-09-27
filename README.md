@@ -151,8 +151,12 @@ path {
 
 - `path "a" "b"` is shorthand for `path { prepend "a" "b" }`. An entry that is
   already on `PATH` moves instead of being duplicated.
-- Values expand a leading `~` and `$VAR` / `${VAR}`. Nodes apply in file
+- Values expand a leading `~` and `$VAR` / `${VAR}`; `$$` is a literal `$`. Nodes apply in file
   order, so `path` can use variables set by an earlier `env`.
+- `export NAME=value` sets `$env.NAME` and saves it in the `env` block
+  (updating an existing `NAME` line in place, or adding one; home written as
+  `~`, `$` written as `$$`). `export NAME` saves the current value;
+  `export --no-save NAME=value` only sets it for this session.
 - `add-path <dir>` appends a `path "<dir>"` line (home written as `~`) unless
   the directory is already listed; `remove-path <dir>` deletes it from
   whichever `path` entry lists it. Other lines and comments are left alone.
@@ -248,6 +252,8 @@ add-path --no-save ./bin      # this session only
 remove-path ~/.local/bin      # undo (also removes it from config.kdl)
 $env.MY_VAR = hello
 echo $env.MY_VAR
+export EDITOR=nvim            # set $env.EDITOR and save it to config.kdl
+export --no-save DEBUG=1      # this session only
 
 # external programs (stdout captured as a string)
 ^uname -a
@@ -296,7 +302,7 @@ Table/list: `where`/`filter`, `find`, `select`, `get`, `first`, `last`, `take`,
 
 Data: `echo`, `range`, `lines`, `input` (multi-line paste / stdin until Ctrl+D),
 `to`/`from` (subcommands `json`, `jwt`), `type`, `describe`, `env`, `sys`, `ps`,
-`whyport`, `now`, `which`, `aliases`, `add-path` (alias `add_to_path`), `remove-path`, `help`, `about`, `exit`
+`whyport`, `now`, `which`, `aliases`, `export`, `add-path` (alias `add_to_path`), `remove-path`, `help`, `about`, `exit`
 
 HTTP: `http get|post|put|delete|patch|head` — fetch/send with structured JSON
 bodies and responses (`http get https://example.com`, `http post URL {a: 1}`,

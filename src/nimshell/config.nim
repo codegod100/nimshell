@@ -21,7 +21,7 @@
 ##   }
 ##
 ## `path "a" "b"` is shorthand for `path { prepend "a" "b" }`. Values expand a
-## leading `~` and `$VAR` / `${VAR}`. Top-level nodes apply in file order, so
+## leading `~` and `$VAR` / `${VAR}` (`$$` is a literal `$`). Top-level nodes apply in file order, so
 ## `path` can use variables set by an earlier `env`.
 
 import std/[os, strutils]
@@ -33,12 +33,17 @@ proc configFile*(): string =
   base / "nimshell" / "config.kdl"
 
 proc expandValue*(s: string): string =
-  ## Expand a leading `~` and `$VAR` / `${VAR}` (unset vars become "").
+  ## Expand a leading `~` and `$VAR` / `${VAR}` (unset vars become "");
+  ## `$$` is a literal `$`.
   var s = expandHome(s)
   var i = 0
   while i < s.len:
     if s[i] == '$' and i + 1 < s.len:
-      if s[i + 1] == '{':
+      if s[i + 1] == '$':
+        result.add '$'
+        i += 2
+        continue
+      elif s[i + 1] == '{':
         let close = s.find('}', i + 2)
         if close > 0:
           result.add getEnv(s[i + 2 ..< close])
@@ -305,3 +310,59 @@ proc removeConfigPaths*(dirs: seq[string]): string =
     return configFile() & ": could not edit line(s) " & unedited.join(", ") &
            "; remove the entry by hand"
   ""
+
+# --- `export`: save a variable in the `env` block of config.kdl ---
+# Also textual: an existing `NAME …` line is rewritten in place, otherwise the
+# entry goes at the end of the last `env { … }` block (or a new block).
+
+proc lineIndent(l: string): string =
+  for ch in l:
+    if ch in {' ', '\t'}: result.add ch
+    else: break
+
+proc bareLine(l: string): string =
+  ## A line without its `//` comment and surrounding whitespace.
+  let i = l.find("//")
+  (if i >= 0: l[0 ..< i] else: l).strip
+
+proc saveConfigEnv*(name, value: string): string =
+  ## Save `name "value"` in config.kdl's `env` block. `value` is stored as
+  ## given (home written as `~`, `$` escaped), so loading it sets the same
+  ## string. Returns an error message, or "".
+  var src: string
+  var nodes: seq[KdlNode]
+  let e = readConfig(src, nodes)
+  if e != "": return e
+  let entry = name & " " & quoteKdl(contractHome(value).replace("$", "$$"))
+  var lines = if src == "": @[] else: src.split('\n')
+  # The last definition wins at startup, so update that one.
+  var hit = -1
+  var lastEnv = -1
+  for i, n in nodes:
+    if n.name != "env": continue
+    lastEnv = i
+    for c in n.children:
+      if c.name == name: hit = c.line - 1
+  if hit >= 0 and hit < lines.len:
+    let t = bareLine(lines[hit])
+    if t.startsWith(name) and t.len > name.len and t[name.len] in Whitespace and
+        '{' notin t and '}' notin t and ';' notin t.strip(leading = false, chars = {';'}):
+      let c = lines[hit].find("//")
+      lines[hit] = lineIndent(lines[hit]) & entry &
+                   (if c >= 0: " " & lines[hit][c .. ^1] else: "")
+      return writeConfig(lines.join("\n"))
+  if lastEnv >= 0:
+    # Insert before the block's closing `}` when it sits on its own line.
+    let n = nodes[lastEnv]
+    let last = if n.children.len > 0: n.children[^1].line else: n.line
+    var i = last
+    while i < lines.len and bareLine(lines[i]) == "": inc i
+    if i < lines.len and i > n.line - 1 and bareLine(lines[i]) == "}":
+      let indent =
+        if n.children.len > 0: lineIndent(lines[n.children[^1].line - 1])
+        else: lineIndent(lines[i]) & "    "
+      lines.insert(indent & entry, i)
+      return writeConfig(lines.join("\n"))
+  if src != "" and not src.endsWith("\n"): src.add "\n"
+  src.add "env {\n    " & entry & "\n}\n"
+  writeConfig(src)
