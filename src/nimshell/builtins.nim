@@ -3,7 +3,7 @@
 import std/[algorithm, base64, httpclient, json, net, options, os, strutils,
             tables, times, uri]
 from std/unicode import runes, `$`, validateUtf8, toLower
-import alias, color, config, display, env, netclient, pager, syntax, sys, update, value
+import alias, color, config, display, env, netclient, pager, prompt, syntax, sys, update, value
 
 type
   BuiltinResultKind* = enum
@@ -173,12 +173,14 @@ proc helpText(): Table[string, string] =
     "describe": "describe — record with type, length, and string form of input",
     "env": "env [NAME] — process environment table, or one var (same as `$env` / `$env.NAME`)",
     "which": "which [-a|--all] [-f|--follow] <name> — path of command (alias, builtin or on PATH); -a all matches, -f follow symlinks",
-    "aliases": "aliases — table of command aliases from config.kdl (name, expansion)",
-    "export": "export [-n|--no-save] NAME=value — set $env.NAME and save it to config.kdl; `export NAME` saves the current value",
-    "add-path": "add-path [-n|--no-save] <dir>… — prepend dirs to PATH and save them to config.kdl (like fish_add_path)",
+    "aliases": "aliases — table of command aliases (name, expansion)",
+    "alias": "alias <name> \"<pipeline>\" — define a command alias (put it in config.ns to keep it)",
+    "prompt": "prompt {setting: value, …} — customize the prompt (e.g. `prompt {character: \"λ\"}`)",
+    "export": "export [-n|--no-save] NAME=value — set $env.NAME and save it to config.ns; `export NAME` saves the current value",
+    "add-path": "add-path [-n|--no-save] [-a|--append] <dir>… — prepend (or append) dirs to PATH and save them to config.ns (like fish_add_path)",
     "add_to_path": "add_to_path — alias for add-path",
-    "remove-path": "remove-path <dir>… — remove dirs from PATH and from config.kdl",
-    "config": "config <edit|path> — open config.kdl in $VISUAL/$EDITOR (then reload it), or print its path",
+    "remove-path": "remove-path <dir>… — remove dirs from PATH and from config.ns",
+    "config": "config <edit|path> — open config.ns in $VISUAL/$EDITOR (then reload it), or print its path",
     "exit": "exit [code] — leave the shell (default code 0)",
     "quit": "quit [code] — alias for exit",
     "ignore": "ignore — discard pipeline input; emit nothing",
@@ -417,12 +419,18 @@ proc helpFor(name: string): Option[string] =
     ].join("\n"))
   of "config":
     some(@[
-      "config <subcommand> — work with the config file (config.kdl)",
+      "config <subcommand> — work with the config file (config.ns)",
+      "",
+      "config.ns is a nimshell script run at startup, e.g.:",
+      "  $env.EDITOR = nvim",
+      "  add-path ~/.local/bin",
+      "  alias ll \"ls -l\"",
+      "  prompt {character: \"λ\", single-line: true}",
       "",
       "Subcommands:",
-      "  edit    open config.kdl in $VISUAL, else $EDITOR, else vi; the",
-      "          config is re-applied when the editor exits",
-      "  path    path of config.kdl ($XDG_CONFIG_HOME/nimshell/config.kdl)",
+      "  edit    open config.ns in $VISUAL, else $EDITOR, else vi; the",
+      "          config is re-run when the editor exits",
+      "  path    path of config.ns ($XDG_CONFIG_HOME/nimshell/config.ns)",
       "",
       "Examples:",
       "  config edit",
@@ -1129,25 +1137,29 @@ proc currentPathDirs(): seq[string] =
     if part != "": result.add part
 
 proc cmdAddPath(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinResult =
-  ## Like fish's `fish_add_path`: move/prepend dirs to the front of `PATH` and
-  ## save them as `path "…"` lines in config.kdl for future sessions.
-  let (noSave, stolen) = findBoolFlag(flags, ["n", "no-save"])
-  let dirsIn = args & stolen
+  ## Like fish's `fish_add_path`: move dirs to the front (or with `--append`
+  ## the back) of `PATH` and save them as `add-path …` lines in config.ns for
+  ## future sessions. While config.ns runs, missing dirs are skipped quietly.
+  let (noSave, stolenN) = findBoolFlag(flags, ["n", "no-save"])
+  let (append, stolenA) = findBoolFlag(flags, ["a", "append"])
+  let dirsIn = stolenN & stolenA & args
   if dirsIn.len == 0:
-    return err(env, "add-path: expected directory (try `add-path [--no-save] <dir>…`)")
+    return err(env, "add-path: expected directory (try `add-path [--no-save] [--append] <dir>…`)")
   var dirs: seq[string]
   for v in dirsIn:
     let d = pathDirArg(env, v)
-    if not dirExists(d): return err(env, "add-path: not a directory: " & d)
+    if not dirExists(d):
+      if loadingConfig: continue
+      return err(env, "add-path: not a directory: " & d)
     if d notin dirs: dirs.add d
-  updatePath(dirs, prepend = true)
-  if not noSave:
+  updatePath(dirs, prepend = not append)
+  if not noSave and not loadingConfig:
     let msg = addConfigPaths(dirs)
     if msg != "": return err(env, "add-path: " & msg)
   pathResult(env)
 
 proc cmdRemovePath(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinResult =
-  ## Undo `add-path`: drop dirs from `PATH` and from config.kdl.
+  ## Undo `add-path`: drop dirs from `PATH` and from config.ns.
   if args.len == 0:
     return err(env, "remove-path: expected directory (try `remove-path <dir>…`)")
   var dirs: seq[string]
@@ -1167,7 +1179,7 @@ proc editorCommand(): string =
   "vi"
 
 proc cmdConfig(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinResult =
-  ## `config edit` opens config.kdl in the user's editor and re-applies it;
+  ## `config edit` opens config.ns in the user's editor and re-runs it;
   ## `config path` returns where it lives.
   let sub = if args.len > 0: asString(args[0]) else: ""
   case sub
@@ -1419,6 +1431,29 @@ proc cmdAliases(env: Env, input: Value, args: seq[Value], flags: Flags): Builtin
   for n in aliasNames(): rows.add @[strV(n), strV(aliases[n].source)]
   ok(env, tableV(@["name", "expansion"], rows))
 
+proc cmdAlias(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinResult =
+  ## `alias name "pipeline"` (an `=` between them is allowed); no args lists.
+  if args.len == 0 and flags.len == 0: return cmdAliases(env, input, args, flags)
+  var a = args
+  # `alias ll = "ls -l"`: the parser turns a bare `=` into "==".
+  if a.len == 3 and a[1] == strV("=="): a.delete(1)
+  if a.len != 2 or flags.len > 0 or a[0].kind != vkString or a[1].kind != vkString:
+    return err(env, "alias: expected `alias <name> \"<pipeline>\"`")
+  let e = defineAlias(a[0].s, a[1].s)
+  if e != "": return err(env, "alias " & a[0].s & ": " & e)
+  ok(env, nothing())
+
+proc cmdPrompt(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinResult =
+  ## `prompt {character: "λ", colors: {cwd: "bold blue"}}` — change prompt
+  ## settings (the rest keep their current values).
+  if args.len != 1 or flags.len > 0:
+    return err(env, "prompt: expected a settings record, e.g. `prompt {character: \"λ\"}`")
+  var cfg = promptConfig
+  let problems = applyPromptSettings(args[0], cfg)
+  promptConfig = cfg
+  if problems.len > 0: return err(env, "prompt: " & problems.join("; "))
+  ok(env, nothing())
+
 proc cmdVersion(env: Env, input: Value, args: seq[Value], flags: Flags): BuiltinResult =
   let image = appImagePath()
   ok(env, recordV(@[("version", strV(NimshellVersion)),
@@ -1522,6 +1557,8 @@ let registryTable = {
   "self-update": cmdSelfUpdate,
   "version": cmdVersion,
   "aliases": cmdAliases,
+  "alias": cmdAlias,
+  "prompt": cmdPrompt,
 }.toTable
 
 proc lookup*(name: string, b: var Builtin): bool =

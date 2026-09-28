@@ -231,7 +231,7 @@ suite "eval":
     check rows == listV(@[strV("/a:/b")])
     putEnv("PATH", saved)
 
-  test "add-path / remove-path edit config.kdl":
+  test "add-path / remove-path edit config.ns":
     let savedPath = getEnv("PATH")
     let savedCfg = getEnv("XDG_CONFIG_HOME")
     let tmp = getTempDir() / "nimshell-addpath-test"
@@ -241,26 +241,29 @@ suite "eval":
     createDir(tmp / "cfg" / "nimshell")
     putEnv("XDG_CONFIG_HOME", tmp / "cfg")
     let cfg = configFile()
-    writeFile(cfg, "// keep me\npath {\n    append \"/opt/x\"\n}\n")
+    writeFile(cfg, "# keep me\nadd-path --append /opt/x /opt/y # note\n")
     putEnv("PATH", "/usr/bin:/bin")
     let v = evalOk("add_to_path " & (tmp / "bin"))
     check v.kind == vkList and v.items[0] == strV(tmp / "bin")
     check getEnv("PATH") == (tmp / "bin") & ":/usr/bin:/bin"
-    check readFile(cfg) == "// keep me\npath {\n    append \"/opt/x\"\n}\npath \"" &
-      (tmp / "bin") & "\"\n"
+    check readFile(cfg) == "# keep me\nadd-path --append /opt/x /opt/y # note\nadd-path " &
+      (tmp / "bin") & "\n"
     # already saved: no duplicate line
     discard evalOk("add-path " & (tmp / "bin"))
-    check configPathDirs() == @["/opt/x", tmp / "bin"]
-    # --no-save changes PATH only
+    check configPathDirs() == @["/opt/x", "/opt/y", tmp / "bin"]
+    # --no-save changes PATH only; --append adds at the end
     discard evalOk("add-path --no-save " & (tmp / "bin2"))
     check getEnv("PATH").startsWith((tmp / "bin2") & ":")
-    check configPathDirs() == @["/opt/x", tmp / "bin"]
+    discard evalOk("add-path --no-save --append " & (tmp / "bin2"))
+    check getEnv("PATH").endsWith(":" & (tmp / "bin2"))
+    check configPathDirs() == @["/opt/x", "/opt/y", tmp / "bin"]
     check evalOk("add-path " & (tmp / "missing")).kind == vkFail
-    # removal drops the line and the dir inside the block
+    # removal drops the dir from its line, and a line left empty
     discard evalOk("remove-path " & (tmp / "bin") & " /opt/x")
     check (tmp / "bin") notin getEnv("PATH").split(':')
-    check readFile(cfg) == "// keep me\npath {\n}\n"
-    # legacy `paths` file migrates into config.kdl
+    check readFile(cfg) == "# keep me\nadd-path --append /opt/y # note\n"
+    # legacy `paths` file migrates into config.ns
+    writeFile(cfg, "")
     writeFile(tmp / "cfg" / "nimshell" / "paths", (tmp / "bin2") & "\n")
     check loadConfig().len == 0
     check not fileExists(tmp / "cfg" / "nimshell" / "paths")
@@ -269,38 +272,34 @@ suite "eval":
     putEnv("XDG_CONFIG_HOME", savedCfg)
     removeDir(tmp)
 
-  test "export sets $env and saves to config.kdl":
+  test "export sets $env and saves to config.ns":
     let savedCfg = getEnv("XDG_CONFIG_HOME")
     let tmp = getTempDir() / "nimshell-export-test"
     removeDir(tmp)
     createDir(tmp / "nimshell")
     putEnv("XDG_CONFIG_HOME", tmp)
     let cfg = configFile()
-    writeFile(cfg, "// keep me\nenv {\n    NS_A \"1\" // note\n}\npath \"/opt/x\"\n")
+    writeFile(cfg, "# keep me\n  $env.NS_A = 1 # note\nadd-path /opt/x\n")
     check evalOk("export NS_A=2") == strV("2")
     check getEnv("NS_A") == "2"
-    check evalOk("export NS_B = \"$5 each\"") == strV("$5 each")
+    check evalOk("export NS_B = \"$5 \\\"each\\\"\"") == strV("$5 \"each\"")
     discard evalOk("export NS_C = ~/go")
     check getEnv("NS_C") == getHomeDir() / "go"
-    check readFile(cfg) == "// keep me\nenv {\n    NS_A \"2\" // note\n" &
-      "    NS_B \"$$5 each\"\n    NS_C \"~/go\"\n}\npath \"/opt/x\"\n"
+    check readFile(cfg) == "# keep me\n  $env.NS_A = \"2\" # note\nadd-path /opt/x\n" &
+      "$env.NS_B = \"$5 \\\"each\\\"\"\n$env.NS_C = \"" & (getHomeDir() / "go") & "\"\n"
     # --no-save only sets the variable; bare `export NAME` saves its value
     discard evalOk("export --no-save NS_D=x")
     check getEnv("NS_D") == "x"
     check "NS_D" notin readFile(cfg)
     discard evalOk("export NS_D")
-    check "NS_D \"x\"" in readFile(cfg)
+    check "$env.NS_D = \"x\"" in readFile(cfg)
     # the saved file loads back to the same values
     delEnv("NS_B")
     check loadConfig().len == 0
-    check getEnv("NS_B") == "$5 each"
+    check getEnv("NS_B") == "$5 \"each\""
     check evalOk("export NS_UNSET_VAR").kind == vkFail
     check evalOk("export PATH=/x").kind == vkFail
     check evalOk("export 1BAD=x").kind == vkFail
-    # a new block is created when there is none
-    writeFile(cfg, "path \"/opt/x\"")
-    discard evalOk("export NS_A=3")
-    check readFile(cfg) == "path \"/opt/x\"\nenv {\n    NS_A \"3\"\n}\n"
     for v in ["NS_A", "NS_B", "NS_C", "NS_D"]: delEnv(v)
     putEnv("XDG_CONFIG_HOME", savedCfg)
     removeDir(tmp)
@@ -838,46 +837,99 @@ suite "kdl":
       check e.msg.startsWith("line 2")
 
 suite "config":
-  test "path and env":
+  teardown: clearAliases()
+  test "a script of statements":
     let saved = getEnv("PATH")
-    putEnv("PATH", "/usr/bin:/bin:/opt/x")
+    putEnv("PATH", "/usr/bin:/bin:/tmp")
     putEnv("NIMSHELL_CFG_BASE", "/base")
     let warnings = applyConfig("""
-      env {
-        NIMSHELL_CFG_A "hello"
-        NIMSHELL_CFG_B "${NIMSHELL_CFG_BASE}/sub"
-        NIMSHELL_CFG_N 42
-        NIMSHELL_CFG_BASE null
-      }
-      path "/first" "$NIMSHELL_CFG_A/bin"
-      path {
-        prepend "/opt/x"
-        append "/last" "/bin"
-      }
+      # comment
+      $env.NIMSHELL_CFG_A = hello
+      let n = range 3 | length
+      $env.NIMSHELL_CFG_B = $NIMSHELL_CFG_BASE/sub
+      $env.NIMSHELL_CFG_BASE = null
+      add-path / /does/not/exist
+      add-path --append /tmp /usr
+      alias five "range 5"
+      alias top = "range 10 | reverse | first 3"
+      echo [1
+        2] |
+        length
+      export NIMSHELL_CFG_C = x
     """)
-    check warnings.len == 0
+    check warnings == newSeq[string]()
     check getEnv("NIMSHELL_CFG_A") == "hello"
     check getEnv("NIMSHELL_CFG_B") == "/base/sub"
-    check getEnv("NIMSHELL_CFG_N") == "42"
+    check getEnv("NIMSHELL_CFG_C") == "x"
     check not existsEnv("NIMSHELL_CFG_BASE")
-    check getEnv("PATH") == "/opt/x:/first:hello/bin:/usr/bin:/last:/bin"
+    check getEnv("PATH") == "/:/usr/bin:/bin:/tmp:/usr"
+    check aliasNames() == @["five", "top"]
     putEnv("PATH", saved)
-    for n in ["NIMSHELL_CFG_A", "NIMSHELL_CFG_B", "NIMSHELL_CFG_N"]: delEnv(n)
+    for n in ["NIMSHELL_CFG_A", "NIMSHELL_CFG_B", "NIMSHELL_CFG_C"]: delEnv(n)
+  test "statements span open brackets and trailing pipes":
+    let st = splitStatements("a\n\n# c\nb {\n  x: 1\n}\nc |\n d\n")
+    check st.len == 3
+    check st[0].line == 1 and st[0].text == "a"
+    check st[1].line == 4 and st[1].lines == 3
+    check st[2].line == 7 and st[2].text == "c |\n d"
   test "tilde expansion":
     check expandValue("~/bin") == getHomeDir().strip(leading = false, chars = {'/'}) & "/bin"
     check expandValue("a~b") == "a~b"
-  test "warnings":
-    let saved = getEnv("PATH")
-    check applyConfig("nope 1").len == 1
-    check applyConfig("path { middle \"/x\" }").len == 1
-    check applyConfig("env { PATH \"/x\" }").len == 1
-    check applyConfig("oops {")[0].startsWith("line ")
-    check getEnv("PATH") == saved
+  test "warnings name the line and the rest still runs":
+    let w = applyConfig("alias x\n$env.NIMSHELL_CFG_W = ok\nprompt {sparkle: true}\nexit 3")
+    check w.len == 3
+    check w[0].startsWith("line 1: alias")
+    check w[1].startsWith("line 3: prompt")
+    check w[2].startsWith("line 4:")
+    check getEnv("NIMSHELL_CFG_W") == "ok"
+    delEnv("NIMSHELL_CFG_W")
   test "config file location":
     let saved = getEnv("XDG_CONFIG_HOME")
     putEnv("XDG_CONFIG_HOME", "/cfg")
-    check configFile() == "/cfg/nimshell/config.kdl"
+    check configFile() == "/cfg/nimshell/config.ns"
     if saved == "": delEnv("XDG_CONFIG_HOME") else: putEnv("XDG_CONFIG_HOME", saved)
+  test "config.kdl is converted once":
+    let savedCfg = getEnv("XDG_CONFIG_HOME")
+    let savedPath = getEnv("PATH")
+    let tmp = getTempDir() / "nimshell-kdl-migrate-test"
+    removeDir(tmp)
+    createDir(tmp / "nimshell")
+    putEnv("XDG_CONFIG_HOME", tmp)
+    putEnv("PATH", "/usr/bin")
+    writeFile(tmp / "nimshell" / "config.kdl", """
+      env {
+        NIMSHELL_MIG_A "~/go"
+        NIMSHELL_MIG_B "${NIMSHELL_MIG_A}/bin"
+        NIMSHELL_MIG_C "two words"
+      }
+      path "/tmp"
+      path { append "/"; }
+      aliases { ll "ls -l" }
+      prompt {
+        single-line #true
+        colors { cwd "bold blue" }
+      }
+    """)
+    let w = loadConfig()
+    check w.len == 1 and w[0].startsWith("converted ")
+    check not fileExists(tmp / "nimshell" / "config.kdl")
+    check fileExists(tmp / "nimshell" / "config.kdl.bak")
+    let ns = readFile(configFile())
+    check "$env.NIMSHELL_MIG_A = ~/go\n" in ns
+    check "$env.NIMSHELL_MIG_B = $NIMSHELL_MIG_A/bin\n" in ns
+    check "$env.NIMSHELL_MIG_C = \"two words\"\n" in ns
+    check "add-path /tmp\nadd-path --append /\n" in ns
+    check "alias ll \"ls -l\"\n" in ns
+    check getEnv("NIMSHELL_MIG_B") == getHomeDir() / "go" / "bin"
+    check getEnv("PATH") == "/tmp:/usr/bin:/"
+    check promptConfig.singleLine and promptConfig.cwdStyle == "\e[1;34m"
+    check isAlias("ll")
+    check loadConfig().len == 0
+    for n in ["NIMSHELL_MIG_A", "NIMSHELL_MIG_B", "NIMSHELL_MIG_C"]: delEnv(n)
+    promptConfig = defaultPromptConfig()
+    putEnv("PATH", savedPath)
+    putEnv("XDG_CONFIG_HOME", savedCfg)
+    removeDir(tmp)
   test "config edit / path":
     let savedCfg = getEnv("XDG_CONFIG_HOME")
     let savedVisual = getEnv("VISUAL")
@@ -885,7 +937,7 @@ suite "config":
     let tmp = getTempDir() / "nimshell-config-edit-test"
     removeDir(tmp)
     putEnv("XDG_CONFIG_HOME", tmp)
-    check evalOk("config path") == strV(tmp / "nimshell" / "config.kdl")
+    check evalOk("config path") == strV(tmp / "nimshell" / "config.ns")
     # the "editor" appends an alias; the config is reloaded afterwards
     delEnv("VISUAL")
     putEnv("EDITOR", "printf 'alias cfgedit \"ls\"\\n' >>")
@@ -898,7 +950,6 @@ suite "config":
     check evalOk("config nope").kind == vkFail
     for (k, v) in [("XDG_CONFIG_HOME", savedCfg), ("VISUAL", savedVisual), ("EDITOR", savedEditor)]:
       if v == "": delEnv(k) else: putEnv(k, v)
-    clearAliases()
     removeDir(tmp)
 
 suite "prompt config":
@@ -919,18 +970,18 @@ suite "prompt config":
     check applyConfig("").len == 0
     check promptChar(false, 0, false) == "❯ "
     check statusLine(false, "/tmp", "", "", 1, 3200, false) == "/tmp took 3.2s ✘ 1"
-  test "prompt block":
+  test "prompt settings":
     let warnings = applyConfig("""
       prompt {
-        character "λ"
-        error-character "✗"
-        nerd-font #false
-        single-line #true
-        blank-line #false
-        git-status #false
-        min-duration 500
-        cwd-depth 1
-        colors { character "bold blue"; error "#ff0000" }
+        character: "λ"
+        error-character: "✗"
+        nerd-font: false
+        single-line: true
+        blank_line: false
+        git-status: false
+        min-duration: 500
+        cwd-depth: 1
+        colors: {character: "bold blue", error: "#ff0000"}
       }
     """)
     check warnings.len == 0
@@ -942,20 +993,23 @@ suite "prompt config":
     check promptChar(true, 0, true) == "\e[1;34mλ\e[0m "
     check statusLine(false, "/a/b", "", "", 0, 600, false) == "…/b took 600ms"
     check "\e[38;2;255;0;0m✘ 1" in statusLine(true, "/a", "", "", 1, 0, false)
+    # later `prompt` calls change only what they name
+    check evalOk("prompt {single-line: false}").kind == vkNothing
+    check not promptConfig.singleLine and promptConfig.character == "λ"
   test "prompt warnings":
-    check applyConfig("prompt { sparkle #true }").len == 1
-    check applyConfig("prompt { single-line \"yes\" }").len == 1
-    check applyConfig("prompt { colors { cwd \"sparkly\" } }").len == 1
-    check applyConfig("prompt { colors { nope \"red\" } }").len == 1
+    check applyConfig("prompt {sparkle: true}").len == 1
+    check applyConfig("prompt {single-line: \"yes\"}").len == 1
+    check applyConfig("prompt {colors: {cwd: \"sparkly\"}}").len == 1
+    check applyConfig("prompt {colors: {nope: \"red\"}}").len == 1
+    check applyConfig("prompt").len == 1
+    check applyConfig("prompt {git: 1, cwd-depth: x}")[0].count(";") == 1
 
 suite "aliases":
   teardown: clearAliases()
-  test "config block and one-liner":
+  test "alias builtin in the config":
     let warnings = applyConfig("""
-      aliases {
-        five "range 5"
-        top3 "range 10 | reverse | first 3"
-      }
+      alias five "range 5"
+      alias top3 = "range 10 | reverse | first 3"
       alias two "five | first 2"
     """)
     check warnings.len == 0
@@ -976,6 +1030,7 @@ suite "aliases":
     check getVar(e, "x") == evalOk("range 5")
     check evalOk("which five") == strV("alias: five = range 5")
     check evalOk("aliases").kind == vkTable
+    check evalOk("alias") == evalOk("aliases")
   test "applyConfig replaces aliases":
     check applyConfig("alias a \"range 1\"").len == 0
     check applyConfig("").len == 0
@@ -985,6 +1040,7 @@ suite "aliases":
     check defineAlias("let", "ls") != ""
     check defineAlias("x", "let y = 1") != ""
     check defineAlias("x", "ls |") != ""
-    check applyConfig("aliases { x 1 }").len == 1
+    check applyConfig("alias x 1").len == 1
     check applyConfig("alias x").len == 1
+    check applyConfig("alias \"bad name\" ls").len == 1
     check not isAlias("x")

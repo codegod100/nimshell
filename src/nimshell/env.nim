@@ -109,5 +109,9 @@ proc setOsEnv*(env: Env, name: string, value: Value): (bool, Env, string) =
   of "": (false, env, "empty environment variable name")
   of "PWD", "pwd": setCwd(env, asString(value))
   else:
+    if value.kind == vkNothing:
+      # `$env.NAME = null` unsets it.
+      delEnv(name)
+      return (true, env, "")
     setenv(name, envToString(name, value))
     (true, env, "")

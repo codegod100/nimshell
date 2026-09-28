@@ -45,7 +45,7 @@ type
   StatementKind* = enum
     stLet,       ## `let name = pipeline`
     stEnvAssign, ## `$env.NAME = pipeline` — set a process environment variable
-    stExport,    ## `export NAME = pipeline` — set and save to config.kdl
+    stExport,    ## `export NAME = pipeline` — set and save to config.ns
     stExpr       ## Bare pipeline expression
 
   Statement* = object

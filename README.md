@@ -19,7 +19,7 @@ values: strings, numbers, lists, records, and tables. Built-in commands like
 ```
 
 The interactive prompt is Starship-inspired and works with zero config (it can
-be customized in [`config.kdl`](#config)):
+be customized in [`config.ns`](#config)):
 
 - full path with `~`
 - git branch (read from `.git`) plus status from `git status`:
@@ -33,7 +33,7 @@ exit). Set `NIMSHELL_NO_TITLE=1` to leave the title alone.
 
 It uses plain Unicode, so it renders in any terminal. With a
 [Nerd Font](https://www.nerdfonts.com) installed, set `NIMSHELL_NERD_FONT=1` for a
-branch icon and the `` terminal prompt character (or `nerd-font #true` in
+branch icon and the `` terminal prompt character (or `prompt {nerd-font: true}` in
 the config).
 
 ## Quick start
@@ -133,76 +133,76 @@ line reads.
 
 ### Config
 
-Optional; nimshell reads `$XDG_CONFIG_HOME/nimshell/config.kdl` (default
-`~/.config/nimshell/config.kdl`) at startup, for both the REPL and `-c`:
+Optional; nimshell runs `$XDG_CONFIG_HOME/nimshell/config.ns` (default
+`~/.config/nimshell/config.ns`) at startup, for both the REPL and `-c`. It is
+an ordinary nimshell script, one statement per line:
 
-```kdl
-env {
-    EDITOR "nvim"
-    GOPATH "~/go"
-    SOME_VAR null          // null unsets
-}
+```nu
+# environment
+$env.EDITOR = nvim
+$env.GOPATH = ~/go
+$env.SOME_VAR = null           # null unsets
 
-path {
-    prepend "~/.local/bin" "$GOPATH/bin"
-    append "/opt/tools/bin"
-}
+# PATH (like fish_add_path: an entry already on PATH moves instead of duplicating)
+add-path ~/.local/bin $GOPATH/bin
+add-path --append /opt/tools/bin
+
+# aliases
+alias ll "ls -l"
+alias gs "^git status --short"
+alias dirs = "ls | where type == dir"
+
+# prompt
+prompt {character: "λ", single-line: true}
 ```
 
-- `path "a" "b"` is shorthand for `path { prepend "a" "b" }`. An entry that is
-  already on `PATH` moves instead of being duplicated.
-- Values expand a leading `~` and `$VAR` / `${VAR}`; `$$` is a literal `$`. Nodes apply in file
-  order, so `path` can use variables set by an earlier `env`.
-- `export NAME=value` sets `$env.NAME` and saves it in the `env` block
-  (updating an existing `NAME` line in place, or adding one; home written as
-  `~`, `$` written as `$$`). `export NAME` saves the current value;
-  `export --no-save NAME=value` only sets it for this session.
-- `add-path <dir>` appends a `path "<dir>"` line (home written as `~`) unless
-  the directory is already listed; `remove-path <dir>` deletes it from
-  whichever `path` entry lists it. Other lines and comments are left alone.
+- Statements run in file order, so later lines can use variables set earlier
+  (`let` works too). A statement continues onto the next line while a `{`,
+  `[` or `(` is open, or when the line ends with `|`.
+- While the config runs, `add-path` and `export` only affect the session
+  (they don't write back to the file), and `add-path` quietly skips
+  directories that don't exist.
+- `export NAME=value` sets `$env.NAME` and saves a `$env.NAME = "value"` line
+  (rewriting an existing one-line `$env.NAME = …` in place, or appending one).
+  `export NAME` saves the current value; `export --no-save NAME=value` only
+  sets it for this session.
+- `add-path <dir>` appends an `add-path <dir>` line (home written as `~`)
+  unless the directory is already listed; `remove-path <dir>` deletes it from
+  whichever `add-path` line lists it. Other lines and comments are left alone.
 - `config edit` opens the file in `$VISUAL` / `$EDITOR` (fallback `vi`) and
-  re-applies it when the editor exits; `config path` prints its location.
-- Mistakes (bad KDL, unknown settings) print a warning to stderr; the shell
-  still starts.
-
-Aliases name a command or a whole pipeline:
-
-```kdl
-aliases {
-    ll "ls -l"
-    gs "^git status --short"
-    dirs "ls | where type == dir"
-}
-alias big "ls | where size > 10000000"    // one-liner form
-```
+  re-runs it when the editor exits; `config path` prints its location.
+- A statement that fails prints a warning with its line number to stderr;
+  the rest of the file still runs and the shell still starts.
+- An existing `config.kdl` (the old format) is converted to `config.ns` the
+  first time nimshell starts, and renamed to `config.kdl.bak`.
 
 Words typed after an alias are appended to its last command (`ll src` runs
 `ls -l src`). An alias can use other aliases or wrap the command it shadows
-(`ls "ls -l"`), and `^name` always skips aliases. `aliases` lists them and
-`which <name>` shows an alias's expansion.
+(`alias ls "ls -l"`), and `^name` always skips aliases. `aliases` (or `alias`
+with no arguments) lists them and `which <name>` shows an alias's expansion.
 
-The `prompt` block customizes the prompt. Every setting is optional; the values
-below are the defaults:
+`prompt {…}` customizes the prompt; each call changes only the settings it
+names. Every setting is optional; the values below are the defaults:
 
-```kdl
+```nu
 prompt {
-    character "❯"          // input marker
-    error-character "❯"    // after a non-zero exit (defaults to `character`)
-    nerd-font #false       // default follows NIMSHELL_NERD_FONT
-    single-line #false     // #true: status and input on one line
-    blank-line #true       // empty line before each prompt
-    git #true              // show the branch
-    git-status #true       // #false skips `git status` (faster in huge repos)
-    min-duration 2000      // ms before "took …" appears
-    cwd-depth 0            // N > 0 shows only the last N dirs: …/b/c
-    colors {
-        cwd "bold cyan"
-        branch "bold purple"
-        git "bold red"
-        duration "bold yellow"
-        error "bold red"
-        character "bold green"
-        error-character "bold red"
+    character: "❯"          # input marker
+    error-character: "❯"    # after a non-zero exit (defaults to `character`)
+    nerd-font: false        # default follows NIMSHELL_NERD_FONT
+    single-line: false      # true: status and input on one line
+    blank-line: true        # empty line before each prompt
+    git: true               # show the branch
+    git-status: true        # false skips `git status` (faster in huge repos)
+    min-duration: 2000      # ms before "took …" appears
+    cwd-depth: 0            # N > 0 shows only the last N dirs: …/b/c
+    colors: {
+        cwd: "bold cyan"
+        branch: "bold purple"
+        git: "bold red"
+        duration: "bold yellow"
+        error: "bold red"
+        character: "bold green"
+        error-character: "bold red"
     }
 }
 ```
@@ -249,12 +249,12 @@ $env.HOME
 $env.PATH                     # a list of directories (joined with `:` for externals)
 $env.PATH = $env.PATH | append ~/.local/bin
 $PATH = $PATH | prepend ~/bin # `$PATH` is shorthand for `$env.PATH`
-add-path ~/.local/bin         # like fish_add_path: prepend + save to config.kdl
+add-path ~/.local/bin         # like fish_add_path: prepend + save to config.ns
 add-path --no-save ./bin      # this session only
-remove-path ~/.local/bin      # undo (also removes it from config.kdl)
+remove-path ~/.local/bin      # undo (also removes it from config.ns)
 $env.MY_VAR = hello
 echo $env.MY_VAR
-export EDITOR=nvim            # set $env.EDITOR and save it to config.kdl
+export EDITOR=nvim            # set $env.EDITOR and save it to config.ns
 export --no-save DEBUG=1      # this session only
 
 # external programs (stdout captured as a string)
@@ -304,7 +304,7 @@ Table/list: `where`/`filter`, `find`, `select`, `get`, `first`, `last`, `take`,
 
 Data: `echo`, `range`, `lines`, `input` (multi-line paste / stdin until Ctrl+D),
 `to`/`from` (subcommands `json`, `jwt`), `type`, `describe`, `env`, `sys`, `ps`,
-`whyport`, `now`, `which`, `aliases`, `export`, `add-path` (alias `add_to_path`), `remove-path`, `config`, `help`, `about`, `exit`
+`whyport`, `now`, `which`, `aliases`, `alias`, `prompt`, `export`, `add-path` (alias `add_to_path`), `remove-path`, `config`, `help`, `about`, `exit`
 
 HTTP: `http get|post|put|delete|patch|head` — fetch/send with structured JSON
 bodies and responses (`http get https://example.com`, `http post URL {a: 1}`,
@@ -349,7 +349,7 @@ src/
     prompt.nim            # Starship-inspired prompt (git status, duration)
     update.nim            # AppImage self-update
     netclient.nim         # HTTP client setup (TLS, proxies)
-    config.nim / kdl.nim  # config.kdl loader + minimal KDL parser
+    config.nim            # config.ns loader (+ kdl.nim to convert old config.kdl)
     env.nim / sys.nim / term.nim
 packaging/
   build-appimage.sh       # AppDir + bundled libs + appimagetool
