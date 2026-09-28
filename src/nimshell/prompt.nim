@@ -5,7 +5,7 @@
 ##
 ## Works in any terminal: plain Unicode by default. Set `NIMSHELL_NERD_FONT=1`
 ## for Nerd Font glyphs (branch icon, terminal prompt character).
-## Customizable via the `prompt { … }` block in config.kdl (see config.nim).
+## Customizable via `prompt {…}` in config.ns (see config.nim).
 
 import std/[os, osproc, strutils]
 import color, sys

@@ -1,4 +1,4 @@
-## Command aliases (from config.kdl). An alias names a pipeline; words typed
+## Command aliases (`alias` builtin, usually in config.ns). An alias names a pipeline; words typed
 ## after the alias are appended to its last command, like shell aliases:
 ## with `ll` = `ls -l`, `ll src` runs `ls -l src`.
 

@@ -169,9 +169,11 @@ proc evalStatement(env: Env, stmt: Statement): EvalResult =
     if ok: cont(setExit(env3, 0), getVar(env3, "env." & stmt.name))
     else: cont(setExit(r.env, 1), failV(msg))
   of stExport:
-    # `export NAME = …`: like `$env.NAME = …`, then saved to config.kdl.
-    # Bare `export NAME` saves the variable's current value.
-    if stmt.name == "PATH" and not stmt.noSave:
+    # `export NAME = …`: like `$env.NAME = …`, then saved to config.ns
+    # (not while the config itself runs). Bare `export NAME` saves the
+    # variable's current value.
+    let save = not stmt.noSave and not loadingConfig
+    if stmt.name == "PATH" and save:
       return cont(setExit(env, 1), failV("export: save PATH entries with `add-path`, " &
                                          "or use `export --no-save PATH = …`"))
     var env2 = env
@@ -184,7 +186,7 @@ proc evalStatement(env: Env, stmt: Statement): EvalResult =
     let value = getVar(env2, "env." & stmt.name)
     if value.kind == vkNothing:
       return cont(setExit(env2, 1), failV("export: " & stmt.name & " is not set"))
-    if not stmt.noSave:
+    if save:
       let msg = saveConfigEnv(stmt.name, envToString(stmt.name, value))
       if msg != "": return cont(setExit(env2, 1), failV("export: " & msg))
     cont(setExit(env2, 0), value)
@@ -201,3 +203,17 @@ proc evalSource*(env: Env, source: string): EvalResult =
   var msg: string
   if not parse(src, stmt, msg): return cont(setExit(env, 1), failV(msg))
   evalStatement(env, stmt)
+
+proc runConfig(src: string): seq[string] =
+  ## Evaluate config.ns statement by statement; failures become warnings
+  ## and the rest of the file still runs.
+  var env = newEnv()
+  for s in splitStatements(src):
+    let r = evalSource(env, s.text)
+    case r.kind
+    of erQuit: result.add("line " & $s.line & ": `exit` is ignored in the config")
+    of erContinue:
+      if r.value.kind == vkFail: result.add("line " & $s.line & ": " & r.value.msg)
+      env = r.env
+
+configRunner = runConfig
