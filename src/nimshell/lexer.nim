@@ -59,8 +59,8 @@ proc isDigit*(c: string): bool =
   c.len == 1 and c[0] in {'0' .. '9'}
 
 proc isIdentStart*(c: string): bool =
-  # Paths: `.jj`, `..`, `./src`, `/tmp`, `~/code`
-  c.len == 1 and c[0] in {'a' .. 'z', 'A' .. 'Z', '_', '.', '/', '~'}
+  # Paths: `.jj`, `..`, `./src`, `/tmp`, `~/code`; `*` `?` for globs (`*.nim`)
+  c.len == 1 and c[0] in {'a' .. 'z', 'A' .. 'Z', '_', '.', '/', '~', '*', '?'}
 
 proc isIdentContinue*(c: string): bool =
   # Path-ish chars: letters/digits already covered; keep `.` `/` `-` `~` mid-token.

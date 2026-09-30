@@ -1,6 +1,6 @@
 ## Evaluate pipelines against the environment.
 
-import std/[strutils, tables]
+import std/[strutils, tables, os, algorithm]
 import alias, builtins, config, env, parser, sys, value
 
 type
@@ -68,6 +68,13 @@ proc formatFlagName(name: string, short: bool): string =
   elif short: "-" & name
   else: "--" & name
 
+proc expandGlob(pattern: string): seq[string] =
+  ## Bare `*`/`?` words expand to sorted matches; no match keeps the word.
+  if not (pattern.contains('*') or pattern.contains('?')): return @[pattern]
+  for f in walkPattern(pattern): result.add f
+  result.sort()
+  if result.len == 0: result = @[pattern]
+
 proc evalArgv(env: Env, args: seq[Arg], argv: var seq[string]): string =
   ## Flatten command args to an argv for external programs, preserving order.
   for a in args:
@@ -75,7 +82,10 @@ proc evalArgv(env: Env, args: seq[Arg], argv: var seq[string]): string =
     of argValue:
       let (ok, v, msg) = evalExpr(env, a.expr)
       if not ok: return msg
-      argv.add asString(v)
+      if a.expr.kind == exLit and a.expr.bare and v.kind == vkString:
+        argv.add expandGlob(v.s)
+      else:
+        argv.add asString(v)
     of argFlag:
       argv.add formatFlagName(a.flagName, a.flagShort)
       if a.hasValue:
